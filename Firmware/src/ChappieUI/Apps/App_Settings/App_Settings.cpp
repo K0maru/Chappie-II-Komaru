@@ -1,9 +1,33 @@
+/**
+ * @file App_Settings.cpp
+ * @brief 
+ * @author K0maru (k0maru3@foxmail.com)
+ * @version 1.0
+ * @date 2024-10-24
+ * 
+ * 
+ * @par 修改日志:
+ *  <Date>     | <Version> | <Author>       | <Description>                   
+ * ----------------------------------------------------------------------------
+ * 2024.10.24  | 1.0       |K0maru          |新增多级菜单Demo
+ */
 #if 1
 #include "App_Settings.h"
 #include "../../../ChappieBsp/Chappie.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
-
+/**
+ * @brief 新增多级菜单必要组件，测试完后整理合并
+ */
+#include "../../../lib/lvgl/examples/lv_examples.h"
+#include "../../../lib/lvgl/src/widgets/lv_btn.h"
+#include "../../../lib/lvgl/src/widgets/lv_img.h"
+#include "../../../lib/lvgl/src/extra/widgets/menu/lv_menu.h"
+#include "../../../lib/lvgl/src/extra/widgets/msgbox/lv_msgbox.h"
+#include "../../../lib/lvgl/src/core/lv_disp.h"
+#include "../../../lib/lvgl/src/core/lv_obj.h"
+#include "../../../lib/lvgl/src/core/lv_event.h"
+#include "../../../lib/lvgl/src/extra/others/msg/lv_msg.h"
 
 HTTPClient http;
 static I2C_BM8563_TimeTypeDef rtc_time;
@@ -119,6 +143,7 @@ static void xTaskOne(void *xTask1)
     }
 }
 
+
 namespace App {
 
     /**
@@ -142,7 +167,45 @@ namespace App {
         // return NULL;
         return (void*)&ui_img_icon_setting_png;
     }
+    /**
+     * @brief 设置界面的多级菜单
+     * @author K0maru3
+     */
+    void App_Settings_menu(void)
+    {
+        /*Create a menu object*/
+        lv_obj_t * menu = lv_menu_create(lv_scr_act());
+        lv_obj_set_size(menu, lv_disp_get_hor_res(NULL), lv_disp_get_ver_res(NULL));
+        lv_obj_center(menu);
 
+        lv_obj_t * cont;
+        lv_obj_t * label;
+
+        /*Create a sub page*/
+        lv_obj_t * sub_page = lv_menu_page_create(menu, NULL);
+
+        cont = lv_menu_cont_create(sub_page);
+        label = lv_label_create(cont);
+        lv_label_set_text(label, "Hello, I am hiding here");
+
+        /*Create a main page*/
+        lv_obj_t * main_page = lv_menu_page_create(menu, NULL);
+
+        cont = lv_menu_cont_create(main_page);
+        label = lv_label_create(cont);
+        lv_label_set_text(label, "Item 1");
+
+        cont = lv_menu_cont_create(main_page);
+        label = lv_label_create(cont);
+        lv_label_set_text(label, "Item 2");
+
+        cont = lv_menu_cont_create(main_page);
+        label = lv_label_create(cont);
+        lv_label_set_text(label, "Item 3 (Click me!)");
+        lv_menu_set_load_page_event(menu, cont, sub_page);
+
+        lv_menu_set_page(menu, main_page);
+    }
 
     /**
      * @brief Called when App is on create
@@ -151,17 +214,18 @@ namespace App {
     void App_Settings_onCreate()
     {
         UI_LOG("[%s] onCreate1\n", App_Settings_appName().c_str());
+        App_Settings_menu();
 
-        /*Create an Arc*/
-        lv_obj_t * arc = lv_arc_create(lv_scr_act());
-        lv_obj_set_size(arc, 150, 150);
-        lv_arc_set_rotation(arc, 135);
-        lv_arc_set_bg_angles(arc, 0, 270);
-        lv_arc_set_value(arc, 40);
-        lv_obj_center(arc);
-        xTaskCreatePinnedToCore(xTaskOne, "TaskOne", 4096*10, NULL, 1, NULL, 0);
+        // /*Create an Arc*/
+        // lv_obj_t * arc = lv_arc_create(lv_scr_act());
+        // lv_obj_set_size(arc, 150, 150);
+        // lv_arc_set_rotation(arc, 135);
+        // lv_arc_set_bg_angles(arc, 0, 270);
+        // lv_arc_set_value(arc, 40);
+        // lv_obj_center(arc);
+        // xTaskCreatePinnedToCore(xTaskOne, "TaskOne", 4096*10, NULL, 1, NULL, 0);
 
-
+        
           /*rtc_date.year = 2023;
             rtc_date.month = 3;
             rtc_date.weekDay = 2;
