@@ -11,7 +11,15 @@
 #include "App_Launcher.h"
 #include "../ChappieUIConfigs.h"
 #include "UI/ui.h"
+#include <WiFi.h>
+#include <WiFiUdp.h>
 
+
+/*用于联网同步时间*/
+
+
+CHAPPIE* device;
+#define USE_MULTCORE 1
 
 /* Structure to hold App num and status */
 struct AppManager_t {
@@ -27,6 +35,9 @@ static AppManager_t _app;
 struct DeviceStatus_t {
     bool updated = false;
     bool autoScreenOff = false;
+    bool WifiOn = false;
+    bool timeupdated = false;
+    bool BleOn = false;
     uint8_t brightness = 127;
     uint32_t autoScreenOffTime = 20000;
 };
@@ -115,7 +126,20 @@ namespace App {
         if (_device_status.autoScreenOff) {
             lv_obj_add_state(ui_ButtonAutoScreenOff, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
         }
-        
+        if (_device_status.WifiOn) {
+            lv_obj_add_state(ui_ButtonWifi, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+        }
+        if (!_device_status.WifiOn) {
+            WiFi.disconnect();
+        }
+        if (_device_status.timeupdated) {
+            _device_status.timeupdated = false;
+
+        }
+        if (_device_status.BleOn) {
+            lv_obj_add_state(ui_ButtonBle, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+        }
+
         _device->lvgl.enable();
     }
 
@@ -182,6 +206,21 @@ namespace App {
             /* Reset auto screen off time counting */
             lv_disp_trig_activity(NULL);
         }
+        /**
+         * @brief wifi按钮按下顺便同步时间
+         */
+        if (_device_status.WifiOn && !_device_status.timeupdated){
+            time_sync();
+            _device_status.timeupdated = true;
+            if(WiFi.status() != WL_CONNECTED){
+                _device_status.WifiOn = false;
+                _device_status.timeupdated = false;
+            }
+        }
+        // if (!_device_status.WifiOn && WiFi.status() == WL_CONNECTED){
+        //     WiFi.disconnect();
+        //     UI_LOG("[WiFi] WiFi close\n");
+        // }
     }
 
 
@@ -216,6 +255,43 @@ namespace App {
     /* ------------------------------------------------ UI events ------------------------------------------------ */
 
 
+
+    static void xTaskOne(void *xTask1){ 
+        while (1)
+        {
+            uint8_t i = 0;
+            struct tm timeinfo;
+
+            WiFi.mode(WIFI_STA);
+            UI_LOG("[WiFi] WiFi mode : STA\n");
+            UI_LOG("[WiFi] try connect\n");
+            WiFi.begin();
+            WiFi.beginSmartConfig();
+            UI_LOG("[WiFi] Waiting for SmartConfig...\n");
+            while (!WiFi.smartConfigDone()) { vTaskDelay(200); }
+
+            UI_LOG("[WiFi] SmartConfig received, connecting WiFi...\n");
+            while (WiFi.status() != WL_CONNECTED) { vTaskDelay(200); }
+
+            UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
+            
+            // configTime(8 * 3600, 0, NTP1, NTP2,NTP3);
+            // UI_LOG("[WiFi] sync time done\n");
+            // getLocalTime(&timeinfo);
+            // Serial.println(&timeinfo, "%F %T %A");
+            
+                //WiFi.disconnect();
+            vTaskDelete(NULL);
+        }
+    }
+    /*sync time*/
+    void App_Launcher::time_sync()
+    {
+        UI_LOG("[WiFi] time sync start\n");
+        xTaskCreatePinnedToCore(xTaskOne, "TaskOne", 4096*10, NULL, 1, NULL, 0);
+        UI_LOG("[WiFi] time sync done\n");
+    }
+    
     void App_Launcher::time_update(lv_timer_t * timer)
     {
         CHAPPIE* device = (CHAPPIE*)timer->user_data;
@@ -325,6 +401,24 @@ namespace App {
             }
             else {
                 _device_status.autoScreenOff = false;
+            }
+        }
+        /* If enable wifi */
+        else if (obj == ui_ButtonWifi) {
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                _device_status.WifiOn = true;
+            }
+            else {
+                _device_status.WifiOn = false;
+            }
+        }
+        /* If enable ble */
+        else if (obj == ui_ButtonBle) {
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                _device_status.BleOn = true;
+            }
+            else {
+                _device_status.BleOn = false;
             }
         }
 
