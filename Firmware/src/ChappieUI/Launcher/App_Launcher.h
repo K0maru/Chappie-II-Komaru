@@ -30,7 +30,7 @@ namespace App {
             static void button_event_cb(lv_event_t * e);
             static void panel_control_pad_event_cb(lv_event_t * e);
             static void sleep_mode();
-            static void time_sync();
+            static void WiFi_config();
 
         public:
             inline App_Launcher(CHAPPIE* device) {  _device = device; }

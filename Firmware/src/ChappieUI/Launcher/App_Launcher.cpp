@@ -207,10 +207,10 @@ namespace App {
             lv_disp_trig_activity(NULL);
         }
         /**
-         * @brief wifi按钮按下顺便同步时间
+         * @brief wifi按钮按下启动配网
          */
         if (_device_status.WifiOn && !_device_status.timeupdated){
-            time_sync();
+            WiFi_config();
             _device_status.timeupdated = true;
             if(WiFi.status() != WL_CONNECTED){
                 _device_status.WifiOn = false;
@@ -275,21 +275,15 @@ namespace App {
 
             UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
             
-            // configTime(8 * 3600, 0, NTP1, NTP2,NTP3);
-            // UI_LOG("[WiFi] sync time done\n");
-            // getLocalTime(&timeinfo);
-            // Serial.println(&timeinfo, "%F %T %A");
-            
-                //WiFi.disconnect();
             vTaskDelete(NULL);
         }
     }
     /*sync time*/
-    void App_Launcher::time_sync()
+    void App_Launcher::WiFi_config()
     {
-        UI_LOG("[WiFi] time sync start\n");
+        UI_LOG("[WiFi] WiFi config start\n");
         xTaskCreatePinnedToCore(xTaskOne, "TaskOne", 4096*10, NULL, 1, NULL, 0);
-        UI_LOG("[WiFi] time sync done\n");
+        UI_LOG("[WiFi] WiFi config done\n");
     }
     
     void App_Launcher::time_update(lv_timer_t * timer)
