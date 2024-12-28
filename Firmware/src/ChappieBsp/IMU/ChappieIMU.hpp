@@ -76,6 +76,17 @@ class ChappieIMU : public MPU6050 {
             return 0;
         }
 
+        inline uint8_t getAcceler(float& accelX, float& accelY, float& accelZ)
+        {
+            int16_t ax, ay, az;
+            getAcceleration(&ax, &ay, &az);
+            // 转换为实际加速度值（单位：g）
+            accelX = ax / 16384.0; // ±2g量程下，每 LSB = 2g / 32768 = 1 / 16384
+            accelY = ay / 16384.0;
+            accelZ = az / 16384.0;
+            return 0;
+        }
+
 
 
 };
