@@ -2,13 +2,14 @@
  * @file App_FallDetection.cpp
  * @brief 
  * @author K0maru (k0maru3@foxmail.com)
- * @version 1.0
+ * @version 0.1
  * @date 2024-12-25
  * 
  * 
  * @par 修改日志:
  *  <Date>     | <Version> | <Author>       | <Description>                   
- * ----------------------------------------------------------------------------
+ * ----------------------------------------------------------------------------------
+ * 2024.12.28  |    0.1    | K0maru         | 新增mpu数据获取(已测试)、跌倒检测(未测试)
  */
 #if 1
 #include "App_FallDetection.h"
@@ -40,7 +41,7 @@ TaskHandle_t task_UI = NULL;
 static std::string app_name = "FallDetection";
 static CHAPPIE* device;
 static LGFX_Sprite* _screen;
-
+static bool DataCollectionEnable = true;
 static bool DetectionEnable = true;
 
 #define GRAVITY_LOST_THRESHOLD 0.6
@@ -117,17 +118,26 @@ namespace App {
                 //UI_LOG("[%s] NOW the sum of Gravity is %f\n", App_FallDetection_appName().c_str(),MPU6050_data_receiver.accelS);
                 if(GRAVITY_LOST){
                     if(GRAVITY_OVER){
+                        TickType_t MotionlessStart = 0;
                         if(MOTION_LESS){
                             if(abs(MPU6050_data_receiver.Pitch) > 45 || abs(MPU6050_data_receiver.Roll) > 45){
                                 FallDownInterrupt();
                             }
                             else{
+                                UI_LOG("[%s] Error detection\n", App_FallDetection_appName().c_str());
                                 GRAVITY_LOST = false;
                                 GRAVITY_OVER = false;
                                 MOTION_LESS = false;
                             }
                         }
+                        if(MotionlessStart == 0&&MOTION_LESS == false) MotionlessStart = xTaskGetTickCount();
+                        if((xTaskGetTickCount() - MotionlessStart) > pdMS_TO_TICKS(1500)&&MPU6050_data_receiver.accelS == 1){
+                            MotionLessInterrupt();
+                        }
+                        
+
                     }
+                    /*失重后，0.5s内检测是否进入超重状态（跌倒）*/
                     if(startTime == 0&&GRAVITY_OVER == false) startTime = xTaskGetTickCount();
                     if((xTaskGetTickCount() - startTime) < pdMS_TO_TICKS(500) && GRAVITY_OVER == false){
                         if(MPU6050_data_receiver.accelS > GRAVITY_OVER_THRESHOLD){
@@ -186,7 +196,7 @@ namespace App {
                                                                         MPU6050_data_receiver.accelY,
                                                                         MPU6050_data_receiver.accelZ);
             _screen->printf(" > AS:  %.1f\n",MPU6050_data_receiver.accelS);
-            _screen->printf(" > LOL\n");
+            _screen->printf(" > try to detect,may be\n");
             _screen->pushSprite(0, 0);
         }
         else{
@@ -228,8 +238,8 @@ namespace App {
             UI_LOG("[%s] Imu already inited\n", App_FallDetection_appName().c_str());
         }
 
-        /*检查是否已经有跌倒检测线程在运行，若有则true*/
-        if(task_mpu == NULL){
+        /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
+        if(task_mpu == NULL && DataCollectionEnable){
             UI_LOG("[%s] try to create MPUtask\n", App_FallDetection_appName().c_str());
 
             xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
@@ -237,7 +247,8 @@ namespace App {
             device->Lcd.printf("Data collection task has been created\n");
             UI_LOG("[%s] Data collection task has been created\n", App_FallDetection_appName().c_str());
         }
-        if(task_detect == NULL){
+        /*检测线程未启动且要求启动时，创建检测线程*/
+        if(task_detect == NULL && DetectionEnable){
             UI_LOG("[%s] try to create Detectiontask\n", App_FallDetection_appName().c_str());
 
             xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
@@ -259,7 +270,6 @@ namespace App {
             //delay(10);
         }
         testscreen_deinit();
-
 
         lv_obj_t * label = lv_label_create(lv_scr_act());
         lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
