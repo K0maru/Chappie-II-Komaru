@@ -41,7 +41,7 @@ TaskHandle_t task_UI = NULL;
 static std::string app_name = "FallDetection";
 static CHAPPIE* device;
 static LGFX_Sprite* _screen;
-static bool DataCollectionEnable = true;
+bool DataCollectionEnable = true;
 static bool DetectionEnable = true;
 
 #define GRAVITY_LOST_THRESHOLD 0.6
@@ -90,6 +90,34 @@ namespace App {
         UI_LOG("[%s] FALL_DOWN\n", App_FallDetection_appName().c_str());
     }
     /**
+     * @brief  通过UI_LOG输出任务状态
+     * @param  task_handler     任务句柄
+     */
+    void TaskStateCheck(TaskHandle_t task_handler){
+        static eTaskState TaskState;
+        TaskState = eTaskStateGet(task_handler);
+        switch (TaskState) {
+            case eRunning:
+                UI_LOG("[%s] Task is Running\n", App_FallDetection_appName().c_str());
+                break;
+            case eReady:
+                UI_LOG("[%s] Task is Ready\n", App_FallDetection_appName().c_str());
+                break;
+            case eBlocked:
+                UI_LOG("[%s] Task is Blocked\n", App_FallDetection_appName().c_str());
+                break;
+            case eSuspended:
+                UI_LOG("[%s] Task is Suspended\n", App_FallDetection_appName().c_str());
+                break;
+            case eDeleted:
+                UI_LOG("[%s] Task is Deleted\n", App_FallDetection_appName().c_str());
+                break;
+            default:
+                UI_LOG("[%s] Invalid State\n", App_FallDetection_appName().c_str());
+                break;
+        }
+    }
+    /**
      * @brief 需要被保持的线程，用于持续获取MPU6050的数据。通过创建一个深度为5的消息队列来方便数据处理和保持。
      * 
      */
@@ -111,9 +139,8 @@ namespace App {
     }
     static void task_falldetect(void* param)
     {
-        
+        TickType_t startTime = 0; // 记录开始时间
         while(1){
-            TickType_t startTime = 0; // 记录开始时间
             if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
                 //UI_LOG("[%s] NOW the sum of Gravity is %f\n", App_FallDetection_appName().c_str(),MPU6050_data_receiver.accelS);
                 if(GRAVITY_LOST){
@@ -145,6 +172,7 @@ namespace App {
                         }
                     }
                     else if(GRAVITY_OVER == false){
+                        startTime = 0;
                         GRAVITY_LOST = false;
                     }
                 }
@@ -243,18 +271,18 @@ namespace App {
             UI_LOG("[%s] try to create MPUtask\n", App_FallDetection_appName().c_str());
 
             xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-
+            TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
-            UI_LOG("[%s] Data collection task has been created\n", App_FallDetection_appName().c_str());
+            //UI_LOG("[%s] Data collection task has been created\n", App_FallDetection_appName().c_str());
         }
         /*检测线程未启动且要求启动时，创建检测线程*/
         if(task_detect == NULL && DetectionEnable){
             UI_LOG("[%s] try to create Detectiontask\n", App_FallDetection_appName().c_str());
 
             xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
-
+            TaskStateCheck(task_detect);
             device->Lcd.printf("Detection task has been created\n");
-            UI_LOG("[%s] Detection task has been created\n", App_FallDetection_appName().c_str());
+            //UI_LOG("[%s] Detection task has been created\n", App_FallDetection_appName().c_str());
         }
         while (1) {
             task_UI_loop();
