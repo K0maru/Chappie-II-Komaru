@@ -46,6 +46,7 @@
 #include "App_WifiTV/App_WifiTV.h"
 // #include "App_Gamepad/App_Gamepad.h"
 #include "App_FallDetection/App_FallDetection.h"
+#include "App_Pedometer/App_Pedometer.h"
 /* Header files locator */
 /* Don't remove this, or python script's auto login will be failed */
 
@@ -68,6 +69,7 @@ namespace App {
 		App_Login(WifiTV),
 		//App_Login(Gamepad),
 		App_Login(FallDetection),
+		App_Login(Pedometer),
 		/* Login locator */
         /* Don't remove this, or python script's auto login will be failed */
 
