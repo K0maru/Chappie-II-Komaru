@@ -20,6 +20,7 @@ static CHAPPIE* device;
 static LGFX_Sprite* _screen;
 
 extern TaskHandle_t task_mpu;
+TaskHandle_t task_pedometer_handler = NULL;
 extern QueueHandle_t mpu_queue;
 struct MPU6050_data_t {
     float Yaw;
@@ -33,7 +34,13 @@ struct MPU6050_data_t {
 static MPU6050_data_t MPU6050_data;
 static MPU6050_data_t MPU6050_data_receiver;
 extern bool DataCollectionEnable;
-
+static bool PedometerEnable = true;
+struct StepCount_t {
+    uint8_t steps = 0;
+    uint8_t date = -1;
+};
+static I2C_BM8563_DateTypeDef rtc_date;
+static StepCount_t StepCount;
 namespace App {
 
     /**
@@ -76,6 +83,23 @@ namespace App {
         }
         
     }
+    static void task_pedometer(void* param)
+    {
+        if(StepCount.date != rtc_date.date){
+            StepCount.date = rtc_date.date;
+            StepCount.steps = 0;
+            UI_LOG("[%s] Init StepCount\n", App_Pedometer_appName().c_str());
+        }
+        while(1){
+            if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
+                //计步算法实现
+            }
+            else{
+                UI_LOG("[%s] Waiting for data\n", App_Pedometer_appName().c_str());
+            }
+        }
+        
+    }
     /**
      * @brief init screen
      */
@@ -98,7 +122,34 @@ namespace App {
         _screen->deleteSprite();
         delete _screen;
     }    
-
+    /**
+     * @brief  通过UI_LOG输出任务状态
+     * @param  task_handler     任务句柄
+     */
+    void TaskStateCheck(TaskHandle_t task_handler){
+        static eTaskState TaskState;
+        TaskState = eTaskStateGet(task_handler);
+        switch (TaskState) {
+            case eRunning:
+                UI_LOG("[%s] Task is Running\n", App_Pedometer_appName().c_str());
+                break;
+            case eReady:
+                UI_LOG("[%s] Task is Ready\n", App_Pedometer_appName().c_str());
+                break;
+            case eBlocked:
+                UI_LOG("[%s] Task is Blocked\n", App_Pedometer_appName().c_str());
+                break;
+            case eSuspended:
+                UI_LOG("[%s] Task is Suspended\n", App_Pedometer_appName().c_str());
+                break;
+            case eDeleted:
+                UI_LOG("[%s] Task is Deleted\n", App_Pedometer_appName().c_str());
+                break;
+            default:
+                UI_LOG("[%s] Invalid State\n", App_Pedometer_appName().c_str());
+                break;
+        }
+    }
     /**
      * @brief Called when App is on create
      * 
@@ -106,9 +157,10 @@ namespace App {
     void App_Pedometer_onCreate()
     {
         UI_LOG("[%s] onCreate\n", App_Pedometer_appName().c_str());
-
+        
         static bool imu_inited = false;
         static bool falldown = false;
+        device->Rtc.getDate(&rtc_date);
         testscreen_init();
         if (!imu_inited) {
             device->Lcd.printf("Init IMU...\n");
@@ -121,12 +173,19 @@ namespace App {
         }
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
         if(task_mpu == NULL && DataCollectionEnable){
-            UI_LOG("[%s] try to create MPUtask\n", App_Pedometer_appName().c_str());
+            UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
 
             xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-
+            TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
-            UI_LOG("[%s] Data collection task has been created\n", App_Pedometer_appName().c_str());
+            //UI_LOG("[%s] Data collection task has been created\n", App_Pedometer_appName().c_str());
+        }
+        if(task_pedometer == NULL && PedometerEnable){
+            UI_LOG("[%s] Try to create Pedometertask\n", App_Pedometer_appName().c_str());
+
+            xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 3, &task_pedometer_handler);
+            TaskStateCheck(task_pedometer_handler);
+            device->Lcd.printf("Pedometer task has been created");
         }        
     }
 
