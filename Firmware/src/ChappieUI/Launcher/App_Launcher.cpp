@@ -256,7 +256,7 @@ namespace App {
 
 
 
-    static void xTaskOne(void *xTask1){ 
+    static void xTaskWiFiConnect(void *xTask1){ 
         while (1)
         {
             uint8_t i = 0;
@@ -282,7 +282,7 @@ namespace App {
     void App_Launcher::WiFi_config()
     {
         UI_LOG("[WiFi] WiFi config start\n");
-        xTaskCreatePinnedToCore(xTaskOne, "TaskOne", 4096*10, NULL, 1, NULL, 0);
+        xTaskCreatePinnedToCore(xTaskWiFiConnect, "TaskWiFiConnect", 6*1024, NULL, 1, NULL, 0);
         UI_LOG("[WiFi] WiFi config done\n");
     }
     
