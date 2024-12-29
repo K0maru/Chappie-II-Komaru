@@ -117,14 +117,6 @@ namespace App {
         lv_menu_separator_create(sub_BLE_page);
         section = lv_menu_section_create(sub_BLE_page);
 
-        // create_switch(section, LV_SYMBOL_BLUETOOTH, "BLE", false);
-
-        // lv_obj_t * sub_display_page = lv_menu_page_create(menu, NULL);
-        // lv_obj_set_style_pad_hor(sub_display_page, lv_obj_get_style_pad_left(lv_menu_get_main_header(menu), 0), 0);
-        // lv_menu_separator_create(sub_display_page);
-        // section = lv_menu_section_create(sub_display_page);
-        // brightness_slider = create_slider(section, LV_SYMBOL_SETTINGS, "Brightness", 0, 150, 100);
-        // lv_obj_add_event_cb(brightness_slider,slider_control_event_cb,LV_EVENT_VALUE_CHANGED,NULL);
 
         lv_obj_t * sub_software_info_page = lv_menu_page_create(menu, NULL);
         lv_obj_set_style_pad_hor(sub_software_info_page, lv_obj_get_style_pad_left(lv_menu_get_main_header(menu), 0), 0);
@@ -159,24 +151,18 @@ namespace App {
         cont = create_text(section, LV_SYMBOL_BLUETOOTH, "BLE", LV_MENU_ITEM_BUILDER_VARIANT_1);
         lv_menu_set_load_page_event(menu, cont, sub_BLE_page);
 
-        // /*亮度调节和自动息屏*/
-        // cont = create_text(section, LV_SYMBOL_SETTINGS, "Display", LV_MENU_ITEM_BUILDER_VARIANT_1);
-        // lv_menu_set_load_page_event(menu, cont, sub_display_page);
 
         create_text(root_page, NULL, "Others", LV_MENU_ITEM_BUILDER_VARIANT_1);
         section = lv_menu_section_create(root_page);
         cont = create_text(section, NULL, "About", LV_MENU_ITEM_BUILDER_VARIANT_1);
         lv_menu_set_load_page_event(menu, cont, sub_about_page);
-        // cont = create_text(section, LV_SYMBOL_SETTINGS, "Menu mode", LV_MENU_ITEM_BUILDER_VARIANT_1);
-        // lv_menu_set_load_page_event(menu, cont, sub_menu_mode_page);
+
         lv_menu_set_sidebar_page(menu, root_page);
         set_sidebar_width(menu, 100);
 
         lv_obj_clear_flag(menu, LV_OBJ_FLAG_SCROLLABLE);
-        lv_event_send(lv_obj_get_child(lv_obj_get_child(lv_menu_get_cur_sidebar_page(menu), 0), 0), LV_EVENT_CLICKED,
-                        NULL);
+        lv_event_send(lv_obj_get_child(lv_obj_get_child(lv_menu_get_cur_sidebar_page(menu), 0), 0), LV_EVENT_CLICKED,NULL);
 
-        
     }
 
     static lv_obj_t * create_text(lv_obj_t * parent, const char * icon, const char * txt,
