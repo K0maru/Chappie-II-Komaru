@@ -9,11 +9,19 @@
  * @par 修改日志:
  *  <Date>     | <Version> | <Author>       | <Description>                   
  * ----------------------------------------------------------------------------
+ * 2024.12.29  |    0.1    |    K0maru      |构建App框架，添加功能组件
+ * 
  */
 #if 1
 #include "App_Pedometer.h"
 #include "../../../ChappieBsp/Chappie.h"
 #include "math.h"
+
+#define QUEUE_LENGTH 5
+#define FILTER_WINDOW 5
+
+static uint8_t QueueIndex = 0;
+static float DataBuffer[FILTER_WINDOW]; 
 
 static std::string app_name = "Pedometer";
 static CHAPPIE* device;
@@ -22,6 +30,7 @@ static LGFX_Sprite* _screen;
 extern TaskHandle_t task_mpu;
 TaskHandle_t task_pedometer_handler = NULL;
 extern QueueHandle_t mpu_queue;
+static QueueHandle_t Filter_queue;
 struct MPU6050_data_t {
     float Yaw;
     float Pitch;
@@ -30,9 +39,15 @@ struct MPU6050_data_t {
     float accelY;
     float accelZ;
     float accelS;
+    float accelXZ;
+};
+struct MPU6050_data_Filter_t {
+    float accelXZ;
 };
 static MPU6050_data_t MPU6050_data;
 static MPU6050_data_t MPU6050_data_receiver;
+static MPU6050_data_Filter_t Filter_sender;
+static MPU6050_data_Filter_t Filter_receiver;
 extern bool DataCollectionEnable;
 static bool PedometerEnable = true;
 struct StepCount_t {
@@ -52,8 +67,6 @@ namespace App {
     {
         return app_name;
     }
-
-
     /**
      * @brief Return the App Icon laucnher, NULL for default
      * 
@@ -69,7 +82,7 @@ namespace App {
      */
     static void task_mpu6050_data(void* param)
     {
-        mpu_queue = xQueueCreate(5,sizeof(MPU6050_data));
+        mpu_queue = xQueueCreate(QUEUE_LENGTH,sizeof(MPU6050_data));
         UI_LOG("[%s] mpu_queue created\n", App_Pedometer_appName().c_str());
         while(1){
             device->Imu.getYawPitchRoll(MPU6050_data.Yaw,MPU6050_data.Pitch,MPU6050_data.Roll);
@@ -77,11 +90,49 @@ namespace App {
             MPU6050_data.accelS = sqrt(MPU6050_data.accelX*MPU6050_data.accelX+
                                        MPU6050_data.accelY*MPU6050_data.accelY+
                                        MPU6050_data.accelZ*MPU6050_data.accelZ);
-            // MPU6050_data.accelS = 1;
+            MPU6050_data.accelXZ = sqrt(MPU6050_data.accelX*MPU6050_data.accelX+MPU6050_data.accelZ*MPU6050_data.accelZ);
             xQueueSend(mpu_queue, &MPU6050_data, portMAX_DELAY);
             vTaskDelay(10); //100hz
         }
         
+    }
+    /**
+     * @brief   五点滤波，每10ms采集数据，每20ms滤波
+     */
+    static void task_5Point_Filter(void* param)
+    {
+        uint8_t task_count = 0;
+        Filter_queue = xQueueCreate(QUEUE_LENGTH,sizeof(Filter_sender));
+        UI_LOG("[%s] Filter_queue created\n", App_Pedometer_appName().c_str());
+        while(1){
+            task_count++;
+            if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
+                //模拟队列
+                if (QueueIndex < FILTER_WINDOW) {
+                    DataBuffer[QueueIndex] = MPU6050_data_receiver.accelXZ;
+                    QueueIndex++;
+                }
+                else {
+                    // 队列已满，覆盖最旧的数据
+                    for (int i = 0; i < FILTER_WINDOW - 1; i++) {
+                        DataBuffer[i] = DataBuffer[i + 1];
+                    }
+                    DataBuffer[FILTER_WINDOW - 1] = MPU6050_data_receiver.accelXZ;
+                }
+            }
+            if(task_count == 2){
+                //20ms滤波一次
+                // 计算五点滤波后的数据（即数据队列的平均值）
+                float sum = 0.0f;
+                for (int i = 0; i < FILTER_WINDOW; i++) {
+                    sum += DataBuffer[i];
+                }
+                Filter_sender.accelXZ = sum / FILTER_WINDOW;
+                xQueueSend(Filter_queue,&Filter_sender,portMAX_DELAY);
+                task_count = 0;
+            }
+            vTaskDelay(10);
+        }
     }
     static void task_pedometer(void* param)
     {
@@ -150,6 +201,36 @@ namespace App {
                 break;
         }
     }
+
+    static void task_UI_loop()
+    {
+        if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
+            _screen->fillScreen(TFT_BLACK);
+            _screen->setTextSize(2);
+            _screen->setTextColor(TFT_ORANGE);
+            _screen->setCursor(0, 30);
+            _screen->printf(" > Yaw: %.1f\n > Pitch: %.1f\n > Row: %.1f\n", MPU6050_data_receiver.Yaw, 
+                                                                        MPU6050_data_receiver.Pitch, 
+                                                                        MPU6050_data_receiver.Roll);
+            _screen->printf(" > AX:  %.1f\n > AY:    %.1f\n > AZ:  %.1f\n", MPU6050_data_receiver.accelX,
+                                                                        MPU6050_data_receiver.accelY,
+                                                                        MPU6050_data_receiver.accelZ);
+            _screen->printf(" > AS:  %.1f\n",MPU6050_data_receiver.accelS);
+            _screen->printf(" > Steps:  %d\n",StepCount.steps);
+            _screen->printf(" > try to count,may be\n");
+            _screen->pushSprite(0, 0);
+        }
+        else{
+            UI_LOG("[%s] no data\n", App_Pedometer_appName().c_str());
+            _screen->fillScreen(TFT_BLACK);
+            _screen->setTextSize(2);
+            _screen->setTextColor(TFT_ORANGE);
+            _screen->setCursor(0, 30);
+            _screen->printf(" > Error\n");
+            _screen->pushSprite(0, 0);
+        }
+        delay(10);
+    }
     /**
      * @brief Called when App is on create
      * 
@@ -186,7 +267,20 @@ namespace App {
             xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 3, &task_pedometer_handler);
             TaskStateCheck(task_pedometer_handler);
             device->Lcd.printf("Pedometer task has been created");
-        }        
+        }
+        while (1) {
+            task_UI_loop();
+            if (device->Button.B.pressed()){
+                UI_LOG("[%s] Button has been pressed\n", App_Pedometer_appName().c_str());
+                break;
+            }
+            //delay(10);
+        }
+        testscreen_deinit();
+
+        lv_obj_t * label = lv_label_create(lv_scr_act());
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        lv_label_set_text(label, "Press B again to quit");      
     }
 
 
