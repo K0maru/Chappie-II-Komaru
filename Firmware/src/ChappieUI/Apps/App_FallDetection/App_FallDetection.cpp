@@ -7,9 +7,10 @@
  * 
  * 
  * @par 修改日志:
- *  <Date>     | <Version> | <Author>       | <Description>                   
+ *  <Date>     | <Version> |   <Author>       | <Description>                   
  * ----------------------------------------------------------------------------------
- * 2024.12.28  |    0.1    | K0maru         | 新增mpu数据获取(已测试)、跌倒检测(未测试)
+ * 2024.12.28  |    0.1    |    K0maru        | 新增mpu数据获取(已测试)、跌倒检测(未测试)
+ * 2024.12.30  |    0.2    |    K0maru        | 因为Pedometer功能而添加部分功能
  */
 #if 1
 #include "App_FallDetection.h"
@@ -31,6 +32,7 @@ struct MPU6050_data_t {
     float accelY;
     float accelZ;
     float accelS;
+    float accelXZ;
 };
 static MPU6050_data_t MPU6050_data;
 static MPU6050_data_t MPU6050_data_receiver;
@@ -131,7 +133,7 @@ namespace App {
             MPU6050_data.accelS = sqrt(MPU6050_data.accelX*MPU6050_data.accelX+
                                        MPU6050_data.accelY*MPU6050_data.accelY+
                                        MPU6050_data.accelZ*MPU6050_data.accelZ);
-            // MPU6050_data.accelS = 1;
+            MPU6050_data.accelXZ = sqrt(MPU6050_data.accelX*MPU6050_data.accelX+MPU6050_data.accelZ*MPU6050_data.accelZ);
             xQueueSend(mpu_queue, &MPU6050_data, portMAX_DELAY);
             vTaskDelay(10); //100hz
         }
