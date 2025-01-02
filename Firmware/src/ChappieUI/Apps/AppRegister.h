@@ -47,6 +47,7 @@
 // #include "App_Gamepad/App_Gamepad.h"
 #include "App_FallDetection/App_FallDetection.h"
 #include "App_Pedometer/App_Pedometer.h"
+#include "App_SedentaryDetection/App_SedentaryDetection.h"
 /* Header files locator */
 /* Don't remove this, or python script's auto login will be failed */
 
@@ -70,6 +71,7 @@ namespace App {
 		//App_Login(Gamepad),
 		App_Login(FallDetection),
 		App_Login(Pedometer),
+		App_Login(SedentaryDetection),
 		/* Login locator */
         /* Don't remove this, or python script's auto login will be failed */
 
