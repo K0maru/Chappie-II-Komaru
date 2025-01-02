@@ -95,7 +95,7 @@ namespace App {
      * @brief  通过UI_LOG输出任务状态
      * @param  task_handler     任务句柄
      */
-    void TaskStateCheck(TaskHandle_t task_handler){
+    void App_FallDetection_TaskStateCheck(TaskHandle_t task_handler){
         static eTaskState TaskState;
         TaskState = eTaskStateGet(task_handler);
         switch (TaskState) {
@@ -273,7 +273,7 @@ namespace App {
             UI_LOG("[%s] try to create MPUtask\n", App_FallDetection_appName().c_str());
 
             xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-            TaskStateCheck(task_mpu);
+            App_FallDetection_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
             //UI_LOG("[%s] Data collection task has been created\n", App_FallDetection_appName().c_str());
         }
@@ -282,7 +282,7 @@ namespace App {
             UI_LOG("[%s] try to create Detectiontask\n", App_FallDetection_appName().c_str());
 
             xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
-            TaskStateCheck(task_detect);
+            App_FallDetection_TaskStateCheck(task_detect);
             device->Lcd.printf("Detection task has been created\n");
             //UI_LOG("[%s] Detection task has been created\n", App_FallDetection_appName().c_str());
         }

@@ -177,7 +177,7 @@ namespace App {
      * @brief  通过UI_LOG输出任务状态
      * @param  task_handler     任务句柄
      */
-    void TaskStateCheck(TaskHandle_t task_handler){
+    void App_Pedometer_TaskStateCheck(TaskHandle_t task_handler){
         static eTaskState TaskState;
         TaskState = eTaskStateGet(task_handler);
         switch (TaskState) {
@@ -257,7 +257,7 @@ namespace App {
             UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
 
             xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-            TaskStateCheck(task_mpu);
+            App_Pedometer_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
             //UI_LOG("[%s] Data collection task has been created\n", App_Pedometer_appName().c_str());
         }
@@ -265,7 +265,7 @@ namespace App {
             UI_LOG("[%s] Try to create Pedometertask\n", App_Pedometer_appName().c_str());
 
             xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 3, &task_pedometer_handler);
-            TaskStateCheck(task_pedometer_handler);
+            App_Pedometer_TaskStateCheck(task_pedometer_handler);
             device->Lcd.printf("Pedometer task has been created");
         }
         while (1) {
