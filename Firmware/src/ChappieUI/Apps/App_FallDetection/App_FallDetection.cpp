@@ -90,6 +90,19 @@ namespace App {
     void IRAM_ATTR FallDownInterrupt(){
         FALL_DOWN = true;
         UI_LOG("[%s] FALL_DOWN\n", App_FallDetection_appName().c_str());
+        while(FALL_DOWN){
+            device->Speaker.tone(9000, 300);
+            
+            if(device->Button.B.pressed()){
+                GRAVITY_LOST = false;
+                GRAVITY_OVER = false;
+                MOTION_LESS = false;
+                FALL_DOWN = false;
+            }
+            delay(10);
+        }
+        
+        
     }
     /**
      * @brief  通过UI_LOG输出任务状态
@@ -160,8 +173,13 @@ namespace App {
                             }
                         }
                         if(MotionlessStart == 0&&MOTION_LESS == false) MotionlessStart = xTaskGetTickCount();
-                        if((xTaskGetTickCount() - MotionlessStart) > pdMS_TO_TICKS(1500)&&MPU6050_data_receiver.accelS == 1){
+                        if(((xTaskGetTickCount() - MotionlessStart) >= pdMS_TO_TICKS(1500)||(xTaskGetTickCount() - MotionlessStart) <= pdMS_TO_TICKS(2500))&&
+                           (MPU6050_data_receiver.accelS >= 0.9||MPU6050_data_receiver.accelS<=1.1)){
                             MotionLessInterrupt();
+                        }
+                        else{
+                            GRAVITY_OVER = false;
+                            GRAVITY_LOST = false;
                         }
                         
 
@@ -213,7 +231,15 @@ namespace App {
     static void task_UI_loop()
     {
         //UI_LOG("[%s] in loop for %d times\n", App_FallDetection_appName().c_str(),looptimes++);
-        if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
+        if(FALL_DOWN){
+            _screen->fillScreen(TFT_BLACK);
+            _screen->setTextSize(2);
+            _screen->setTextColor(TFT_ORANGE);
+            _screen->setCursor(0, 30);
+            _screen->printf(" > if ok, press B\n");
+            _screen->pushSprite(0, 0);
+        }
+        else if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
             //UI_LOG("[%s] got data\n", App_FallDetection_appName().c_str());
             _screen->fillScreen(TFT_BLACK);
             _screen->setTextSize(2);
@@ -238,14 +264,6 @@ namespace App {
             _screen->printf(" > Error\n");
             _screen->pushSprite(0, 0);
         }
-        // if(FALL_DOWN){
-        //     _screen->fillScreen(TFT_BLACK);
-        //     _screen->setTextSize(2);
-        //     _screen->setTextColor(TFT_ORANGE);
-        //     _screen->setCursor(0, 30);
-        //     _screen->printf(" > Are you OK?\n");
-        //     _screen->pushSprite(0, 0);
-        // }
         delay(10);
     }
     /**
@@ -291,10 +309,7 @@ namespace App {
             if (device->Button.B.pressed()){
                 UI_LOG("[%s] Button has been pressed\n", App_FallDetection_appName().c_str());
                 //vTaskDelete(task_UI);
-                GRAVITY_LOST = false;
-                GRAVITY_OVER = false;
-                MOTION_LESS = false;
-                FALL_DOWN = false;
+                
                 break;
             }
             //delay(10);
