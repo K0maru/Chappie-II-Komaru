@@ -9,7 +9,7 @@
  * 
  */
 #include "ChappieUI.h"
-
+#include <nvs_flash.h>
 
 int CHAPPIEUI::begin()
 {
@@ -39,10 +39,16 @@ int CHAPPIEUI::begin()
 
     /* Init lvgl */
     _device->lvgl.init(&_device->Lcd, &_device->Tp);
-
+    esp_err_t err = nvs_flash_init();
+    
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // 如果 NVS 空间不足或存在新版本的 NVS 数据，需要格式化 NVS
+        ESP_ERROR_CHECK(nvs_flash_erase());  // 格式化 NVS
+        err = nvs_flash_init();  // 再次初始化
+    }
     /* Start launcher */
     _launcher->onCreate();
-
+    
     return 0;
 }
 
