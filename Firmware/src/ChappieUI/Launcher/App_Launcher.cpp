@@ -12,10 +12,17 @@
 #include "../ChappieUIConfigs.h"
 #include "UI/ui.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <WiFiUdp.h>
+#include <nvs.h>
+#include <nvs_flash.h>
 
-
-/*用于联网同步时间*/
+typedef enum{
+    wifi_unconfiged = 0,
+    wifi_configed = 0xAA,
+}wifi_info_str_t;
+wifi_config_t wifi_config;
+#define ID_AND_PWD_LEN (32+64)
 
 
 CHAPPIE* device;
@@ -209,10 +216,11 @@ namespace App {
         /**
          * @brief wifi按钮按下启动配网
          */
-        if (_device_status.WifiOn && !_device_status.timeupdated){
+        if (_device_status.WifiOn && !_device_status.timeupdated && (WiFi.status() != WL_CONNECTED)){
             WiFi_config();
             _device_status.timeupdated = true;
             if(WiFi.status() != WL_CONNECTED){
+                WiFi.disconnect();
                 _device_status.WifiOn = false;
                 _device_status.timeupdated = false;
             }
@@ -254,36 +262,152 @@ namespace App {
     
     /* ------------------------------------------------ UI events ------------------------------------------------ */
 
+    void clearWiFiConfigFlag(void){
+        nvs_handle nvs;
+        //  0.打开
+        nvs_open("WIFI_CONFIG", NVS_READWRITE, &nvs); 
+        //  1.写入标记 0x00,清除配网标记
+        nvs_set_u8(nvs, "WifiConfigFlag", wifi_unconfiged);
+        //  2.提交 并保存表的内容
+        ESP_ERROR_CHECK(nvs_commit(nvs)); 
+        //  3.关闭nvs退出
+        nvs_close(nvs); 
+    }
 
+    /**
+     * @brief  保存wifi配置参数结构体变量wifi_config到nvs
+     * @param  wifi_config      wifi配置参数
+     */
+    static void saveWifiConfig(wifi_config_t *wifi_config)
+    {
+        nvs_handle nvs;
+        //  0.打开
+        nvs_open("WIFI_CONFIG", NVS_READWRITE, &nvs); 
+        //  1.写入标记 0xaa,表示已经配过网
+        nvs_set_u8(nvs, "WifiConfigFlag", wifi_configed);
+        //  2.写入AP ID和AP password
+        ESP_ERROR_CHECK(nvs_set_blob(nvs, "wifi_config", wifi_config, ID_AND_PWD_LEN));
+        //  3.提交 并保存表的内容
+        ESP_ERROR_CHECK(nvs_commit(nvs)); 
+        //  4.关闭nvs退出
+        nvs_close(nvs);                   
+    }
 
-    static void xTaskWiFiConnect(void *xTask1){ 
-        while (1)
-        {
-            uint8_t i = 0;
-            struct tm timeinfo;
+    //从nvs中读取wifi配置到给定的sta_config结构体变量
+    static esp_err_t readWifiConfig(wifi_config_t *sta_config)
+    {
+        nvs_handle nvs;
+        unsigned char u8WifiConfigVal;
+        //  0.打开
+        nvs_open("WIFI_CONFIG", NVS_READWRITE, &nvs); 
+        //  1.读取标志位，并判断
+        nvs_get_u8(nvs, "WifiConfigFlag", &u8WifiConfigVal);
+        if(u8WifiConfigVal != wifi_configed){
+            // 1.1 没有配过网，关闭nvs，返回错误码
+            ESP_LOGE("WIFI", "no wifi config,read fail!");
+            nvs_close(nvs); 
+            return ESP_FAIL;
+        }else{      
+            //  1.2 进入下个步骤
+            ESP_LOGI("WIFI", "wifi configed,read ok!");    
+        }
+        //  2.读取上一次配网的ID，password
+        uint32_t len = ID_AND_PWD_LEN;
+        esp_err_t err = nvs_get_blob(nvs, "wifi_config", sta_config, &len);
 
-            WiFi.mode(WIFI_STA);
-            UI_LOG("[WiFi] WiFi mode : STA\n");
-            UI_LOG("[WiFi] try connect\n");
-            WiFi.begin();
-            WiFi.beginSmartConfig();
-            UI_LOG("[WiFi] Waiting for SmartConfig...\n");
-            while (!WiFi.smartConfigDone()) { vTaskDelay(200); }
+        ESP_LOGI("WIFI", "readout  SSID:%s", sta_config->sta.ssid);
+        ESP_LOGI("WIFI", "readout  PASSWORD:%s", sta_config->sta.password);
+        // 3.关闭nvs退出
+        nvs_close(nvs);
+        return err;
+    }
 
-            UI_LOG("[WiFi] SmartConfig received, connecting WiFi...\n");
-            while (WiFi.status() != WL_CONNECTED) { vTaskDelay(200); }
+    // static void task_WiFiConnect(void *xTask1){ 
+    //     while (1)
+    //     {
+    //         uint8_t i = 0;
+    //         struct tm timeinfo;
 
-            UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
+    //         WiFi.mode(WIFI_STA);
+    //         //ESP_LOGI("[WIFI]", "WiFi mode : STA");
+    //         UI_LOG("[WiFi] WiFi mode : STA\n");
+    //         UI_LOG("[WiFi] try connect\n");
+    //         WiFi.begin();
+    //         WiFi.beginSmartConfig();
+    //         UI_LOG("[WiFi] Waiting for SmartConfig...\n");
+    //         while (!WiFi.smartConfigDone()) { vTaskDelay(200); }
+
+    //         UI_LOG("[WiFi] SmartConfig received, connecting WiFi...\n");
+    //         while (WiFi.status() != WL_CONNECTED) { vTaskDelay(200); }
+
+    //         UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
             
+    //         vTaskDelete(NULL);
+    //     }
+    // }
+    static void task_WiFiConnect(void *xTask1){
+        
+        if(readWifiConfig(&wifi_config) == ESP_OK){
+            wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+            //	1.已经配过网，直接连AP
+            wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+            ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+            ESP_LOGI("WIFI","WiFi init.");
+            /* 设置WiFi的工作模式为 STA */
+            ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+            ESP_LOGI("WIFI","Mode: STA");
+            /* 设置WiFi连接的参数，主要是ssid和password */
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+            ESP_LOGI("WIFI","Set config");
+            /* 启动WIFI 驱动程序*/
+            ESP_ERROR_CHECK(esp_wifi_start());  
+            ESP_LOGI("WIFI","WiFi Start");      
+            /* 启动WiFi连接到 AP*/
+            //ESP_ERROR_CHECK(esp_wifi_connect());
+            while(esp_wifi_connect()!=ESP_OK){ vTaskDelay(200); }
+            vTaskDelay(100);
+            ESP_LOGD("WIFI_CFG","SSID: %s PWD: %s",wifi_config.sta.ssid,wifi_config.sta.password);
+            ESP_LOGI("WIFI","Status: Connected IP: %s",WiFi.localIP().toString().c_str());
+            ESP_LOGD("WIFI","SSID: %s PWD: %s",WiFi.SSID(),WiFi.psk());
             vTaskDelete(NULL);
         }
+        else{
+            WiFi.mode(WIFI_STA);
+            ESP_LOGI("WIFI", "WiFi mode : STA");
+            ESP_LOGI("WIFI", "Try to connect");
+            WiFi.begin();
+            WiFi.beginSmartConfig();
+            clearWiFiConfigFlag();
+            //ESP_ERROR_CHECK(WiFi.begin());
+            //ESP_ERROR_CHECK(WiFi.beginSmartConfig());
+            ESP_LOGI("WIFI", "Waiting for SmartConfig...");
+            //UI_LOG("[WiFi] Waiting for SmartConfig...\n");
+            while (!WiFi.smartConfigDone()) { vTaskDelay(200); }
+            ESP_LOGI("WIFI","SmartConfig received, connecting WiFi...");
+            //UI_LOG("[WiFi] SmartConfig received, connecting WiFi...\n");
+            while (WiFi.status() != WL_CONNECTED) { vTaskDelay(200); }
+            if(WiFi.status() == WL_CONNECTED){
+                memset(&wifi_config,0,sizeof(wifi_config));
+                memcpy(wifi_config.sta.ssid,WiFi.SSID().c_str(),sizeof(wifi_config.sta.ssid));
+                memcpy(wifi_config.sta.password,WiFi.psk().c_str(),sizeof(wifi_config.sta.password));
+                ESP_LOGD("WIFI_CFG","SSID: %s PWD: %s",wifi_config.sta.ssid,wifi_config.sta.password);
+                ESP_LOGD("WIFI","SSID: %s PWD: %s",WiFi.SSID(),WiFi.psk());
+                saveWifiConfig(&wifi_config);
+            }
+            ESP_LOGI("WIFI","Status: Connected IP: %s",WiFi.localIP().toString().c_str());
+            /*补上存配置的代码*/
+            ESP_LOGD("WIFI","Task close.");
+            //UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str()); 
+            vTaskDelete(NULL);
+        }
+
     }
-    /*sync time*/
+    /*WiFi config*/
     void App_Launcher::WiFi_config()
     {
         UI_LOG("[WiFi] WiFi config start\n");
-        xTaskCreatePinnedToCore(xTaskWiFiConnect, "TaskWiFiConnect", 6*1024, NULL, 1, NULL, 0);
-        UI_LOG("[WiFi] WiFi config done\n");
+        xTaskCreatePinnedToCore(task_WiFiConnect, "TaskWiFiConnect", 6*1024, NULL, 1, NULL, 0);
+        //UI_LOG("[WiFi] WiFi config done\n");
     }
     
     void App_Launcher::time_update(lv_timer_t * timer)
@@ -404,6 +528,8 @@ namespace App {
             }
             else {
                 _device_status.WifiOn = false;
+                WiFi.disconnect();
+                ESP_LOGI("WIFI","WiFi Disconnect");
             }
         }
         /* If enable ble */
