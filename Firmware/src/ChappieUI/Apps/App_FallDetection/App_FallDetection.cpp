@@ -256,7 +256,8 @@ namespace App {
             ESP_LOGI(App_FallDetection_appName().c_str(),"SW_datacollection handler called back");
             if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
                 if(task_mpu == NULL){
-                    xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
+                    xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
+                    //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
                 }
                 DetectionEnable = true;
             }
@@ -355,7 +356,7 @@ namespace App {
         lv_obj_set_size(sw_det, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_size(sw_data, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_align(sw_det,LV_ALIGN_LEFT_MID,0,0);
-        lv_obj_align_to(sw_data,sw_det,LV_ALIGN_BOTTOM_LEFT,0,0);
+        lv_obj_align_to(sw_data,sw_det,LV_ALIGN_BOTTOM_MID,0,0);
         lv_obj_add_event_cb(sw_data,lv_sw_handler,LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(sw_det,lv_sw_handler,LV_EVENT_CLICKED, NULL);
         //lv_obj_center(sw_det);
@@ -387,8 +388,8 @@ namespace App {
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
         if(task_mpu == NULL && DataCollectionEnable){
             UI_LOG("[%s] try to create MPUtask\n", App_FallDetection_appName().c_str());
-
-            xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
+            xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
+            //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
             App_FallDetection_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
             UI_LOG("[%s] Data collection task has been created\n", App_FallDetection_appName().c_str());
@@ -443,9 +444,9 @@ namespace App {
     {
         /*在选择关闭检测功能的情况下再删除task，不关闭的情况下要保持该task*/
         if(DetectionEnable == false){
-            vTaskDelete(task_mpu);
-            task_mpu = NULL;
-            UI_LOG("[%s] Data collection task has been destoryed\n", App_FallDetection_appName().c_str());
+            vTaskDelete(task_detect);
+            task_detect = NULL;
+            UI_LOG("[%s] Detection task has been destoryed\n", App_FallDetection_appName().c_str());
         }
         if(task_update!=NULL){
             vTaskDelete(task_update);

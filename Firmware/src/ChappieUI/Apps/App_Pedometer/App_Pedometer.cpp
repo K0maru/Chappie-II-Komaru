@@ -29,6 +29,7 @@ static LGFX_Sprite* _screen;
 
 extern TaskHandle_t task_mpu;
 TaskHandle_t task_pedometer_handler = NULL;
+TaskHandle_t task_filter = NULL;
 extern QueueHandle_t mpu_queue;
 static QueueHandle_t Filter_queue;
 struct MPU6050_data_t {
@@ -42,7 +43,7 @@ struct MPU6050_data_t {
     float accelXZ;
 };
 struct MPU6050_data_Filter_t {
-    float accelXZ;
+    float accelS;
 };
 static MPU6050_data_t MPU6050_data;
 static MPU6050_data_t MPU6050_data_receiver;
@@ -56,6 +57,18 @@ struct StepCount_t {
 };
 static I2C_BM8563_DateTypeDef rtc_date;
 static StepCount_t StepCount;
+
+#define ACCEL_BUFFER_SIZE 100  // 加速度数据的缓存大小（用于计算自相关）
+
+#define T_MAX 100  // 最大时间窗口
+#define T_MIN 20   // 最小时间窗口
+
+float accelS[ACCEL_BUFFER_SIZE];  // 存储加速度强度数据
+float autocorr[ACCEL_BUFFER_SIZE];  // 自相关值
+
+int current_index = 0;  // 当前加速度数据索引
+int threshold = 50;  // 自相关值的阈值，用于判断步伐周期
+
 namespace App {
 
     /**
@@ -75,6 +88,22 @@ namespace App {
     void* App_Pedometer_appIcon()
     {
         return NULL;
+    }
+
+    float calculate_mean(float data[], int length) {
+        float sum = 0;
+        for (int i = 0; i < length; i++) {
+            sum += data[i];
+        }
+        return sum / length;
+    }
+
+    float calculate_std(float data[], int length, float mean) {
+        float sum = 0;
+        for (int i = 0; i < length; i++) {
+            sum += (data[i] - mean) * (data[i] - mean);
+        }
+        return sqrt(sum / length);
     }
     /**
      * @brief 需要被保持的线程，用于持续获取MPU6050的数据。通过创建一个深度为5的消息队列来方便数据处理和保持。
@@ -101,11 +130,10 @@ namespace App {
      */
     static void task_5Point_Filter(void* param)
     {
-        uint8_t task_count = 0;
         Filter_queue = xQueueCreate(QUEUE_LENGTH,sizeof(Filter_sender));
-        UI_LOG("[%s] Filter_queue created\n", App_Pedometer_appName().c_str());
+        ESP_LOGI(App_Pedometer_appName().c_str(),"Filter_queue created");
+        //UI_LOG("[%s] Filter_queue created\n", App_Pedometer_appName().c_str());
         while(1){
-            task_count++;
             if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
                 //模拟队列
                 if (QueueIndex < FILTER_WINDOW) {
@@ -117,37 +145,65 @@ namespace App {
                     for (int i = 0; i < FILTER_WINDOW - 1; i++) {
                         DataBuffer[i] = DataBuffer[i + 1];
                     }
-                    DataBuffer[FILTER_WINDOW - 1] = MPU6050_data_receiver.accelXZ;
+                    DataBuffer[FILTER_WINDOW - 1] = MPU6050_data_receiver.accelS;
                 }
             }
-            if(task_count == 2){
-                //20ms滤波一次
-                // 计算五点滤波后的数据（即数据队列的平均值）
-                float sum = 0.0f;
-                for (int i = 0; i < FILTER_WINDOW; i++) {
-                    sum += DataBuffer[i];
-                }
-                Filter_sender.accelXZ = sum / FILTER_WINDOW;
-                xQueueSend(Filter_queue,&Filter_sender,portMAX_DELAY);
-                task_count = 0;
+            //20ms滤波一次
+            // 计算五点滤波后的数据（即数据队列的平均值）
+            float sum = 0.0f;
+            for (int i = 0; i < FILTER_WINDOW; i++) {
+                sum += DataBuffer[i];
             }
-            vTaskDelay(10);
+            Filter_sender.accelS = sum / FILTER_WINDOW;
+            accelS[current_index] = Filter_sender.accelS;
+            current_index = (current_index + 1) % ACCEL_BUFFER_SIZE;
+            //xQueueSend(Filter_queue,&Filter_sender,portMAX_DELAY);
+            vTaskDelay(20);
         }
+    }
+    float calculate_autocorrelation(int T, float mean) {
+        float numerator = 0.0;
+        float denominator1 = 0.0;
+        float denominator2 = 0.0;
+
+        for (int t = 0; t < T; t++) {
+            numerator += (accelS[t] - mean) * (accelS[t + T] - mean);
+            denominator1 += (accelS[t] - mean) * (accelS[t] - mean);
+            denominator2 += (accelS[t + T] - mean) * (accelS[t + T] - mean);
+        }
+
+        // 计算自相关系数
+        return numerator / (sqrt(denominator1 * denominator2));
     }
     static void task_pedometer(void* param)
     {
         if(StepCount.date != rtc_date.date){
             StepCount.date = rtc_date.date;
             StepCount.steps = 0;
-            UI_LOG("[%s] Init StepCount\n", App_Pedometer_appName().c_str());
+            ESP_LOGI(App_Pedometer_appName().c_str(),"Init steps for new day");
+            //UI_LOG("[%s] Init StepCount\n", App_Pedometer_appName().c_str());
         }
         while(1){
-            if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
-                //计步算法实现
+            // 计算自相关系数
+            //float autocorr = calculate_autocorrelation(T, mean);
+            float best_autocorr = 0;
+            int best_T = T_MIN;
+
+            // 在 T_min 到 T_max 范围内查找最佳的 T
+            for (int T = T_MIN; T <= T_MAX; T++) {
+                float mean = calculate_mean(accelS, T);
+                float std = calculate_std(accelS, T, mean);
+                float autocorr = calculate_autocorrelation(T, mean);
+                if (autocorr > best_autocorr) {
+                    best_autocorr = autocorr;
+                    best_T = T;
+                }
             }
-            else{
-                UI_LOG("[%s] Waiting for data\n", App_Pedometer_appName().c_str());
+            if (best_autocorr > 0.93) {
+                    StepCount.steps++;  // 步数加一
+                    ESP_LOGI(App_Pedometer_appName().c_str(),"Step detected! Total steps: %d",StepCount.steps);
             }
+            vTaskDelay(100);
         }
         
     }
@@ -180,27 +236,36 @@ namespace App {
     void App_Pedometer_TaskStateCheck(TaskHandle_t task_handler){
         static eTaskState TaskState;
         TaskState = eTaskStateGet(task_handler);
+
         switch (TaskState) {
             case eRunning:
+                //ESP_LOGI(App_Pedometer_appName().c_str(),"Task is Running");
                 UI_LOG("[%s] Task is Running\n", App_Pedometer_appName().c_str());
                 break;
             case eReady:
+                //ESP_LOGI(App_Pedometer_appName().c_str(),"Task is Ready");
                 UI_LOG("[%s] Task is Ready\n", App_Pedometer_appName().c_str());
                 break;
             case eBlocked:
+                //ESP_LOGI(App_Pedometer_appName().c_str(),"Task is Blocked");
                 UI_LOG("[%s] Task is Blocked\n", App_Pedometer_appName().c_str());
                 break;
             case eSuspended:
+                //ESP_LOGI(App_Pedometer_appName().c_str(),"Task is Suspended");
                 UI_LOG("[%s] Task is Suspended\n", App_Pedometer_appName().c_str());
                 break;
             case eDeleted:
+                //ESP_LOGI(App_Pedometer_appName().c_str(),"Task is Deleted");
                 UI_LOG("[%s] Task is Deleted\n", App_Pedometer_appName().c_str());
                 break;
             default:
+                //ESP_LOGI(App_Pedometer_appName().c_str(),"Invalid State");
                 UI_LOG("[%s] Invalid State\n", App_Pedometer_appName().c_str());
                 break;
         }
     }
+
+
 
     static void task_UI_loop()
     {
@@ -245,31 +310,39 @@ namespace App {
         testscreen_init();
         if (!imu_inited) {
             device->Lcd.printf("Init IMU...\n");
-            UI_LOG("[%s] Imu not init\n", App_Pedometer_appName().c_str());
+            ESP_LOGI(App_Pedometer_appName().c_str(),"Imu not init");
+            //UI_LOG("[%s] Imu not init\n", App_Pedometer_appName().c_str());
             imu_inited = true;
             device->Imu.init();
         }
         else{
-            UI_LOG("[%s] Imu already inited\n", App_Pedometer_appName().c_str());
+            ESP_LOGI(App_Pedometer_appName().c_str(),"Imu already inited");
+            //UI_LOG("[%s] Imu already inited\n", App_Pedometer_appName().c_str());
         }
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
         if(task_mpu == NULL && DataCollectionEnable){
-            UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
-
-            xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
+            ESP_LOGI(App_Pedometer_appName().c_str(),"Try to create MPUtask");
+            //UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
+            xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
+            //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
             App_Pedometer_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
             //UI_LOG("[%s] Data collection task has been created\n", App_Pedometer_appName().c_str());
         }
-        if(task_pedometer == NULL && PedometerEnable){
-            UI_LOG("[%s] Try to create Pedometertask\n", App_Pedometer_appName().c_str());
-
-            xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 3, &task_pedometer_handler);
+        if(task_pedometer_handler == NULL && PedometerEnable){
+            ESP_LOGI(App_Pedometer_appName().c_str(),"Try to create Filtertask");
+            //UI_LOG("[%s] Try to create Pedometertask\n", App_Pedometer_appName().c_str());
+            //xTaskCreate(task_5Point_Filter,"Filter",5000,NULL,3,&task_filter);
+            xTaskCreatePinnedToCore(task_5Point_Filter,"Filter",5000,NULL,3,&task_filter, 0);
+            App_Pedometer_TaskStateCheck(task_filter);
+            ESP_LOGI(App_Pedometer_appName().c_str(),"Try to create Pedometertask");
+            xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 2, &task_pedometer_handler);
             App_Pedometer_TaskStateCheck(task_pedometer_handler);
             device->Lcd.printf("Pedometer task has been created");
         }
         while (1) {
             task_UI_loop();
+            //ESP_LOGI("UI","is looping");
             if (device->Button.B.pressed()){
                 UI_LOG("[%s] Button has been pressed\n", App_Pedometer_appName().c_str());
                 break;
@@ -303,6 +376,25 @@ namespace App {
     void App_Pedometer_onDestroy()
     {
         UI_LOG("[%s] onDestroy\n", App_Pedometer_appName().c_str());
+        /*在选择关闭检测功能的情况下再删除task，不关闭的情况下要保持该task*/
+        // if(PedometerEnable == false){
+        //     vTaskDelete(task_pedometer_handler);
+        //     task_pedometer_handler = NULL;
+        //     ESP_LOGI(App_Pedometer_appName().c_str(),"Pedometer task has been destoryed");
+        //     vTaskDelete(task_filter);
+        //     task_filter = NULL;
+        //     ESP_LOGI(App_Pedometer_appName().c_str(),"Filter task has been destoryed");
+        //     //UI_LOG("[%s] Pedometer task has been destoryed\n", App_Pedometer_appName().c_str());
+        // }
+        vTaskDelete(task_pedometer_handler);
+        task_pedometer_handler = NULL;
+        ESP_LOGI(App_Pedometer_appName().c_str(),"Pedometer task has been destoryed");
+        vTaskDelete(task_filter);
+        task_filter = NULL;
+        ESP_LOGI(App_Pedometer_appName().c_str(),"Filter task has been destoryed");
+        testscreen_deinit();
+        ESP_LOGI(App_Pedometer_appName().c_str(),"onDestroy");
+        //UI_LOG("[%s] onDestroy\n", App_Pedometer_appName().c_str());
     }
 
 
