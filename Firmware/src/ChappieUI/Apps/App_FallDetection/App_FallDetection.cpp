@@ -58,7 +58,8 @@ lv_timer_t * det_timer = NULL;
 #define GRAVITY_OVER_THRESHOLD 2
 #define PITCH_THRESHOLD 45
 #define ROLL_THRESHOLD 45
-
+#define scr_act_height() lv_obj_get_height(lv_scr_act())
+#define scr_act_width() lv_obj_get_width(lv_scr_act())
 static int looptimes = 0;
 
 namespace App {
@@ -237,6 +238,7 @@ namespace App {
             if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
                 if(task_detect == NULL){
                     xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
+                    ESP_LOGI(App_FallDetection_appName().c_str(),"task_falldetect has been created");
                     det_timer = lv_timer_create(label_value_update,20,&MPU6050_data_receiver);
                     ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer has been created");
                 }
@@ -244,8 +246,8 @@ namespace App {
             }
             else{
                 DetectionEnable = false;
-                
                 lv_timer_del(det_timer);
+                det_timer = NULL;
                 ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer has been detected");
                 vTaskDelete(task_detect);
                 ESP_LOGI(App_FallDetection_appName().c_str(),"task_detect has been detected");
@@ -260,9 +262,11 @@ namespace App {
                     //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
                 }
                 DetectionEnable = true;
+                ESP_LOGI(App_FallDetection_appName().c_str(),"DetectionEnable set true");
             }
             else{
                 DetectionEnable = false;
+                ESP_LOGI(App_FallDetection_appName().c_str(),"DetectionEnable set false");
                 vTaskDelete(task_mpu);
                 ESP_LOGI(App_FallDetection_appName().c_str(),"task_mpu has been detected");
                 task_mpu = NULL;
@@ -343,22 +347,48 @@ namespace App {
 
         /*Tile1: 显示跌倒次数和开关*/
         lv_obj_t * tile1 = lv_tileview_add_tile(tv, 0, 0, LV_DIR_BOTTOM);
-        sw_data = lv_switch_create(tile1);
-        if(DataCollectionEnable){lv_obj_add_state(sw_data,LV_STATE_CHECKED);}
-        sw_det = lv_switch_create(tile1);
-        if(DetectionEnable){lv_obj_add_state(sw_det,LV_STATE_CHECKED);}
-        lv_obj_t * label = lv_label_create(tile1);
+        //sw_data = lv_switch_create(tile1);
+        
+        //sw_det = lv_switch_create(tile1);
+        
+        lv_obj_t * label = NULL;
 
-        label = lv_label_create(sw_det);
-        lv_label_set_text(label, "Detection");
-        label = lv_label_create(sw_data);
-        lv_label_set_text(label, "Collection");
-        lv_obj_set_size(sw_det, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_size(sw_data, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_align(sw_det,LV_ALIGN_LEFT_MID,0,0);
-        lv_obj_align_to(sw_data,sw_det,LV_ALIGN_BOTTOM_MID,0,0);
-        lv_obj_add_event_cb(sw_data,lv_sw_handler,LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(sw_det,lv_sw_handler,LV_EVENT_CLICKED, NULL);
+        /* 基础对象（矩形背景） */
+        lv_obj_t *obj_det = lv_obj_create(tile1);                               /* 创建基础对象 */
+        lv_obj_set_size(obj_det,scr_act_height() / 2, scr_act_height() / 2 );          /* 设置大小 */
+        lv_obj_align(obj_det, LV_ALIGN_CENTER, -scr_act_width() / 4, 0 );              /* 设置位置 */
+
+
+        /* 开关标签 */
+        lv_obj_t *label_det = lv_label_create(obj_det);                               /* 创建标签 */
+        lv_label_set_text(label_det, "Detection");                                          /* 设置文本内容 */
+        lv_obj_align(label_det, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );          /* 设置位置 */
+
+        /* 开关 */
+        sw_det = lv_switch_create(obj_det);                                       /* 创建开关 */
+        lv_obj_set_size(sw_det,scr_act_height() / 6, scr_act_height() / 12 );      /* 设置大小 */
+        lv_obj_align(sw_det, LV_ALIGN_CENTER, 0, scr_act_height() / 16 );          /* 设置位置 */
+        if(DetectionEnable){lv_obj_add_state(sw_det,LV_STATE_CHECKED);}
+        lv_obj_add_event_cb(sw_det, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
+
+        /* 基础对象（矩形背景） */
+        lv_obj_t *obj_data = lv_obj_create(tile1);
+        lv_obj_set_size(obj_data,scr_act_height() / 2, scr_act_height() / 2 );
+        lv_obj_align(obj_data, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
+
+        /* 开关标签 */
+        lv_obj_t *label_data = lv_label_create(obj_data);
+        lv_label_set_text(label_data, "Collection");
+        lv_obj_align(label_data, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );
+
+
+        /* 开关 */
+        sw_data = lv_switch_create(obj_data);
+        lv_obj_set_size(sw_data ,scr_act_height() / 6, scr_act_height() / 12 );
+        lv_obj_align(sw_data , LV_ALIGN_CENTER, 0, scr_act_height() / 16 );
+        if(DataCollectionEnable){lv_obj_add_state(sw_data,LV_STATE_CHECKED);}
+        lv_obj_add_event_cb(sw_data, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
+
         //lv_obj_center(sw_det);
         /*Tile2：实时显示调试信息*/
         lv_obj_t * tile2 = lv_tileview_add_tile(tv, 0, 1, LV_DIR_TOP);
@@ -444,14 +474,18 @@ namespace App {
     {
         /*在选择关闭检测功能的情况下再删除task，不关闭的情况下要保持该task*/
         if(DetectionEnable == false){
-            vTaskDelete(task_detect);
-            task_detect = NULL;
-            UI_LOG("[%s] Detection task has been destoryed\n", App_FallDetection_appName().c_str());
-        }
-        if(task_update!=NULL){
-            vTaskDelete(task_update);
-            task_update = NULL;
-            UI_LOG("[%s] update task has been destoryed\n", App_FallDetection_appName().c_str());
+            if(det_timer != NULL){
+                lv_timer_del(det_timer);
+                det_timer = NULL;
+                ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer Delete");
+            }
+            if(task_detect != NULL){
+                vTaskDelete(task_detect);
+                task_detect = NULL;
+                ESP_LOGI(App_FallDetection_appName().c_str(),"Detection task has been destoryed");
+            }
+            
+            //UI_LOG("[%s] Detection task has been destoryed\n", App_FallDetection_appName().c_str());
         }
         testscreen_deinit();
         UI_LOG("[%s] onDestroy\n", App_FallDetection_appName().c_str());
