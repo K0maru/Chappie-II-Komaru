@@ -23,9 +23,6 @@ volatile bool FALL_DOWN = false;
 volatile bool MOTION_LESS = false;
 
 lv_obj_t* lv_mpu;
-lv_obj_t* lv_Pitch;
-lv_obj_t* lv_Roll;
-lv_obj_t* lv_AS;
 
 QueueHandle_t mpu_queue = NULL;
 
@@ -218,7 +215,7 @@ namespace App {
         }
     }
 
-    void label_value_update(lv_timer_t* timer){
+    void mpu_value_update(lv_timer_t* timer){
 
         MPU6050_data_t* data = (MPU6050_data_t*)timer->user_data;
         ESP_LOGD("%s","Now,Yaw: %.1f",App_FallDetection_appName(),data->Yaw);
@@ -239,7 +236,7 @@ namespace App {
                 if(task_detect == NULL){
                     xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
                     ESP_LOGI(App_FallDetection_appName().c_str(),"task_falldetect has been created");
-                    det_timer = lv_timer_create(label_value_update,20,&MPU6050_data_receiver);
+                    det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
                     ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer has been created");
                 }
                 DetectionEnable = true;
@@ -394,7 +391,7 @@ namespace App {
         lv_obj_t * tile2 = lv_tileview_add_tile(tv, 0, 1, LV_DIR_TOP);
         lv_mpu = lv_label_create(tile2);
         
-        det_timer = lv_timer_create(label_value_update,20,&MPU6050_data_receiver);
+        det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
     }
     /**
      * @brief Called when App is on create
