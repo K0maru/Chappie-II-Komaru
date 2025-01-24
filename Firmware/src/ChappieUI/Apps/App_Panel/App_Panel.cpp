@@ -1,19 +1,17 @@
 /**
- * @file App_FallDetection.cpp
+ * @file App_Panel.cpp
  * @brief 
  * @author K0maru (k0maru3@foxmail.com)
- * @version 0.1
- * @date 2024-12-25
+ * @version 1.0
+ * @date 2025-01-22
  * 
  * 
  * @par 修改日志:
- *  <Date>     | <Version> |   <Author>       | <Description>                   
- * ----------------------------------------------------------------------------------
- * 2024.12.28  |    0.1    |    K0maru        | 新增mpu数据获取(已测试)、跌倒检测(未测试)
- * 2024.12.30  |    0.2    |    K0maru        | 因为Pedometer功能而添加部分功能
+ *  <Date>     | <Version> | <Author>       | <Description>                   
+ * ----------------------------------------------------------------------------
  */
 #if 1
-#include "App_FallDetection.h"
+#include "App_Panel.h"
 #include "../../../ChappieBsp/Chappie.h"
 #include "math.h"
 
@@ -24,8 +22,8 @@ volatile bool MOTION_LESS = false;
 
 lv_obj_t* lv_mpu;
 
-QueueHandle_t mpu_queue = NULL;
-
+extern QueueHandle_t mpu_queue;
+extern TaskHandle_t task_mpu;
 struct MPU6050_data_t {
     float Yaw;
     float Pitch;
@@ -38,17 +36,17 @@ struct MPU6050_data_t {
 };
 static MPU6050_data_t MPU6050_data;
 static MPU6050_data_t MPU6050_data_receiver;
-TaskHandle_t task_mpu = NULL;
+
 TaskHandle_t task_detect = NULL;
 TaskHandle_t task_UI = NULL;
 TaskHandle_t task_update = NULL;
-static std::string app_name = "FallDetection";
+static std::string app_name = "Panel";
 static CHAPPIE* device;
 static LGFX_Sprite* _screen;
-bool DataCollectionEnable = true;
+//bool DataCollectionEnable = true;
 static bool DetectionEnable = true;
 
-lv_obj_t * sw_data = NULL;
+//lv_obj_t * sw_data = NULL;
 lv_obj_t * sw_det = NULL;
 lv_timer_t * det_timer = NULL;
 #define GRAVITY_LOST_THRESHOLD 0.6
@@ -66,7 +64,7 @@ namespace App {
      * 
      * @return std::string 
      */
-    std::string App_FallDetection_appName()
+    std::string App_Panel_appName()
     {
         return app_name;
     }
@@ -77,25 +75,25 @@ namespace App {
      * 
      * @return void* 
      */
-    void* App_FallDetection_appIcon()
+    void* App_Panel_appIcon()
     {
         return NULL;
     }
     void IRAM_ATTR GravityLostInterrupt() {
         GRAVITY_LOST = true;
-        UI_LOG("[%s] GRAVITY_LOST\n", App_FallDetection_appName().c_str());
+        UI_LOG("[%s] GRAVITY_LOST\n", App_Panel_appName().c_str());
     }
     void IRAM_ATTR GravityOverInterrupt() {
         GRAVITY_OVER = true;
-        UI_LOG("[%s] GRAVITY_OVER\n", App_FallDetection_appName().c_str());
+        UI_LOG("[%s] GRAVITY_OVER\n", App_Panel_appName().c_str());
     }
     void IRAM_ATTR MotionLessInterrupt() {
         MOTION_LESS = true;
-        UI_LOG("[%s] MOTION_LESS\n", App_FallDetection_appName().c_str());
+        UI_LOG("[%s] MOTION_LESS\n", App_Panel_appName().c_str());
     } 
     void IRAM_ATTR FallDownInterrupt(){
         FALL_DOWN = true;
-        UI_LOG("[%s] FALL_DOWN\n", App_FallDetection_appName().c_str());
+        UI_LOG("[%s] FALL_DOWN\n", App_Panel_appName().c_str());
         while(FALL_DOWN){
             device->Speaker.tone(9000, 300);
             
@@ -115,27 +113,27 @@ namespace App {
      * @brief  通过UI_LOG输出任务状态
      * @param  task_handler     任务句柄
      */
-    void App_FallDetection_TaskStateCheck(TaskHandle_t task_handler){
+    void App_Panel_TaskStateCheck(TaskHandle_t task_handler){
         static eTaskState TaskState;
         TaskState = eTaskStateGet(task_handler);
         switch (TaskState) {
             case eRunning:
-                UI_LOG("[%s] Task is Running\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Task is Running\n", App_Panel_appName().c_str());
                 break;
             case eReady:
-                UI_LOG("[%s] Task is Ready\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Task is Ready\n", App_Panel_appName().c_str());
                 break;
             case eBlocked:
-                UI_LOG("[%s] Task is Blocked\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Task is Blocked\n", App_Panel_appName().c_str());
                 break;
             case eSuspended:
-                UI_LOG("[%s] Task is Suspended\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Task is Suspended\n", App_Panel_appName().c_str());
                 break;
             case eDeleted:
-                UI_LOG("[%s] Task is Deleted\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Task is Deleted\n", App_Panel_appName().c_str());
                 break;
             default:
-                UI_LOG("[%s] Invalid State\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Invalid State\n", App_Panel_appName().c_str());
                 break;
         }
     }
@@ -146,8 +144,8 @@ namespace App {
     static void task_mpu6050_data(void* param)
     {
         mpu_queue = xQueueCreate(5,sizeof(MPU6050_data));
-        ESP_LOGI(App_FallDetection_appName().c_str(),"mpu_queue created");
-        //UI_LOG("[%s] mpu_queue created\n", App_FallDetection_appName().c_str());
+        ESP_LOGI(App_Panel_appName().c_str(),"mpu_queue created");
+        //UI_LOG("[%s] mpu_queue created\n", App_Panel_appName().c_str());
         while(1){
             device->Imu.getYawPitchRoll(MPU6050_data.Yaw,MPU6050_data.Pitch,MPU6050_data.Roll);
             device->Imu.getAcceler(MPU6050_data.accelX,MPU6050_data.accelY,MPU6050_data.accelZ);
@@ -174,7 +172,7 @@ namespace App {
                                 FallDownInterrupt();
                             }
                             else{
-                                ESP_LOGI(App_FallDetection_appName().c_str(),"Error detection");
+                                ESP_LOGI(App_Panel_appName().c_str(),"Error detection");
                                 GRAVITY_LOST = false;
                                 GRAVITY_OVER = false;
                                 MOTION_LESS = false;
@@ -209,7 +207,7 @@ namespace App {
                 }
             }
             else{
-                UI_LOG("[%s] Waitting for data\n", App_FallDetection_appName().c_str());
+                UI_LOG("[%s] Waitting for data\n", App_Panel_appName().c_str());
             }
             vTaskDelay(20);
         }
@@ -218,7 +216,7 @@ namespace App {
     void mpu_value_update(lv_timer_t* timer){
 
         MPU6050_data_t* data = (MPU6050_data_t*)timer->user_data;
-        ESP_LOGD("%s","Now,Yaw: %.1f",App_FallDetection_appName(),data->Yaw);
+        ESP_LOGI("DEBUG","Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);
         lv_obj_set_size(lv_mpu, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_label_set_text_fmt(lv_mpu, "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);//格式化显示输出
         lv_obj_align(lv_mpu, LV_ALIGN_LEFT_MID, 0, 0);     //显示坐标设置
@@ -231,13 +229,13 @@ namespace App {
     static void lv_sw_handler(lv_event_t *e){
         lv_obj_t * obj = lv_event_get_target(e);
         if(obj == sw_det){
-            ESP_LOGI(App_FallDetection_appName().c_str(),"SW_detection handler called back");
+            ESP_LOGI(App_Panel_appName().c_str(),"SW_detection handler called back");
             if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
                 if(task_detect == NULL){
                     xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
-                    ESP_LOGI(App_FallDetection_appName().c_str(),"task_falldetect has been created");
+                    ESP_LOGI(App_Panel_appName().c_str(),"task_falldetect has been created");
                     det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
-                    ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer has been created");
+                    ESP_LOGI(App_Panel_appName().c_str(),"det_timer has been created");
                 }
                 DetectionEnable = true;
             }
@@ -245,30 +243,30 @@ namespace App {
                 DetectionEnable = false;
                 lv_timer_del(det_timer);
                 det_timer = NULL;
-                ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer has been detected");
+                ESP_LOGI(App_Panel_appName().c_str(),"det_timer has been detected");
                 vTaskDelete(task_detect);
-                ESP_LOGI(App_FallDetection_appName().c_str(),"task_detect has been detected");
+                ESP_LOGI(App_Panel_appName().c_str(),"task_detect has been detected");
                 task_detect = NULL;
             }
         }
-        else if(obj == sw_data){
-            ESP_LOGI(App_FallDetection_appName().c_str(),"SW_datacollection handler called back");
-            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
-                if(task_mpu == NULL){
-                    xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
-                    //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-                }
-                DetectionEnable = true;
-                ESP_LOGI(App_FallDetection_appName().c_str(),"DetectionEnable set true");
-            }
-            else{
-                DetectionEnable = false;
-                ESP_LOGI(App_FallDetection_appName().c_str(),"DetectionEnable set false");
-                vTaskDelete(task_mpu);
-                ESP_LOGI(App_FallDetection_appName().c_str(),"task_mpu has been detected");
-                task_mpu = NULL;
-            }
-        }
+        // else if(obj == sw_data){
+        //     ESP_LOGI(App_Panel_appName().c_str(),"SW_datacollection handler called back");
+        //     if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+        //         if(task_mpu == NULL){
+        //             xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
+        //             //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
+        //         }
+        //         DetectionEnable = true;
+        //         ESP_LOGI(App_Panel_appName().c_str(),"DetectionEnable set true");
+        //     }
+        //     else{
+        //         DetectionEnable = false;
+        //         ESP_LOGI(App_Panel_appName().c_str(),"DetectionEnable set false");
+        //         // vTaskDelete(task_mpu);
+        //         // ESP_LOGI(App_Panel_appName().c_str(),"task_mpu has been detected");
+        //         task_mpu = NULL;
+        //     }
+        // }
     }
 
 /*----------------------------------------------------UI&DEVICE-------------------------------------------------------------------*/
@@ -299,7 +297,7 @@ namespace App {
      */
     static void task_UI_loop()
     {
-        //UI_LOG("[%s] in loop for %d times\n", App_FallDetection_appName().c_str(),looptimes++);
+        //UI_LOG("[%s] in loop for %d times\n", App_Panel_appName().c_str(),looptimes++);
         if(FALL_DOWN){
             _screen->fillScreen(TFT_BLACK);
             _screen->setTextSize(2);
@@ -309,7 +307,7 @@ namespace App {
             _screen->pushSprite(0, 0);
         }
         else if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
-            //UI_LOG("[%s] got data\n", App_FallDetection_appName().c_str());
+            //UI_LOG("[%s] got data\n", App_Panel_appName().c_str());
             _screen->fillScreen(TFT_BLACK);
             _screen->setTextSize(2);
             _screen->setTextColor(TFT_ORANGE);
@@ -325,7 +323,7 @@ namespace App {
             _screen->pushSprite(0, 0);
         }
         else{
-            UI_LOG("[%s] no data\n", App_FallDetection_appName().c_str());
+            UI_LOG("[%s] no data\n", App_Panel_appName().c_str());
             _screen->fillScreen(TFT_BLACK);
             _screen->setTextSize(2);
             _screen->setTextColor(TFT_ORANGE);
@@ -338,7 +336,7 @@ namespace App {
     /**
      * @brief App界面
      */
-    static void App_FallDetection_tileview(void)
+    static void App_Panel_tileview(void)
     {
         lv_obj_t * tv = lv_tileview_create(lv_scr_act());
 
@@ -369,22 +367,22 @@ namespace App {
         lv_obj_add_event_cb(sw_det, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
 
         /* 基础对象（矩形背景） */
-        lv_obj_t *obj_data = lv_obj_create(tile1);
-        lv_obj_set_size(obj_data,scr_act_height() / 2, scr_act_height() / 2 );
-        lv_obj_align(obj_data, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
+        // lv_obj_t *obj_data = lv_obj_create(tile1);
+        // lv_obj_set_size(obj_data,scr_act_height() / 2, scr_act_height() / 2 );
+        // lv_obj_align(obj_data, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
 
         /* 开关标签 */
-        lv_obj_t *label_data = lv_label_create(obj_data);
-        lv_label_set_text(label_data, "Collection");
-        lv_obj_align(label_data, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );
+        // lv_obj_t *label_data = lv_label_create(obj_data);
+        // lv_label_set_text(label_data, "Collection");
+        // lv_obj_align(label_data, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );
 
 
         /* 开关 */
-        sw_data = lv_switch_create(obj_data);
-        lv_obj_set_size(sw_data ,scr_act_height() / 6, scr_act_height() / 12 );
-        lv_obj_align(sw_data , LV_ALIGN_CENTER, 0, scr_act_height() / 16 );
-        if(DataCollectionEnable){lv_obj_add_state(sw_data,LV_STATE_CHECKED);}
-        lv_obj_add_event_cb(sw_data, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
+        // sw_data = lv_switch_create(obj_data);
+        // lv_obj_set_size(sw_data ,scr_act_height() / 6, scr_act_height() / 12 );
+        // lv_obj_align(sw_data , LV_ALIGN_CENTER, 0, scr_act_height() / 16 );
+        // //if(DataCollectionEnable){lv_obj_add_state(sw_data,LV_STATE_CHECKED);}
+        // lv_obj_add_event_cb(sw_data, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
 
         //lv_obj_center(sw_det);
         /*Tile2：实时显示调试信息*/
@@ -397,46 +395,38 @@ namespace App {
      * @brief Called when App is on create
      * 
      */
-    void App_FallDetection_onCreate()
+    void App_Panel_onCreate()
     {
-        UI_LOG("[%s] onCreate\n", App_FallDetection_appName().c_str());
-        static bool imu_inited = false;
+        UI_LOG("[%s] onCreate\n", App_Panel_appName().c_str());
+        
         static bool falldown = false;
         testscreen_init();
-        if (!imu_inited) {
-            device->Lcd.printf("Init IMU...\n");
-            UI_LOG("[%s] Imu not init\n", App_FallDetection_appName().c_str());
-            imu_inited = true;
-            device->Imu.init();
-        }
-        else{
-            UI_LOG("[%s] Imu already inited\n", App_FallDetection_appName().c_str());
-        }
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
-        if(task_mpu == NULL && DataCollectionEnable){
-            UI_LOG("[%s] try to create MPUtask\n", App_FallDetection_appName().c_str());
+        if(task_mpu == NULL){
+            ESP_LOGI(App_Panel_appName().c_str(),"Try to create MPUtask");
+            //UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
             xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
             //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-            App_FallDetection_TaskStateCheck(task_mpu);
+            App_Panel_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
-            UI_LOG("[%s] Data collection task has been created\n", App_FallDetection_appName().c_str());
+            //UI_LOG("[%s] Data collection task has been created\n", App_Pedometer_appName().c_str());
         }
         /*检测线程未启动且要求启动时，创建检测线程*/
         if(task_detect == NULL && DetectionEnable){
-            UI_LOG("[%s] try to create Detectiontask\n", App_FallDetection_appName().c_str());
+            UI_LOG("[%s] try to create Detectiontask\n", App_Panel_appName().c_str());
 
             xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
-            App_FallDetection_TaskStateCheck(task_detect);
+            App_Panel_TaskStateCheck(task_detect);
             device->Lcd.printf("Detection task has been created\n");
-            UI_LOG("[%s] Detection task has been created\n", App_FallDetection_appName().c_str());
+            UI_LOG("[%s] Detection task has been created\n", App_Panel_appName().c_str());
         }
 
         
-        App_FallDetection_tileview();
+        App_Panel_tileview();
         // while (1) {
         //     task_UI_loop();
         //     if (device->Button.B.pressed()){
-        //         UI_LOG("[%s] Button has been pressed\n", App_FallDetection_appName().c_str());
+        //         UI_LOG("[%s] Button has been pressed\n", App_Panel_appName().c_str());
         //         //vTaskDelete(task_UI);
                 
         //         break;
@@ -457,7 +447,7 @@ namespace App {
      * Try use millis() instead of delay() here
      * 
      */
-    void App_FallDetection_onLoop()
+    void App_Panel_onLoop()
     {
     }
 
@@ -467,25 +457,25 @@ namespace App {
      * Please remember to release the resourse like lvgl timers in this function
      * 
      */
-    void App_FallDetection_onDestroy()
+    void App_Panel_onDestroy()
     {
         /*在选择关闭检测功能的情况下再删除task，不关闭的情况下要保持该task*/
         if(DetectionEnable == false){
             if(det_timer != NULL){
                 lv_timer_del(det_timer);
                 det_timer = NULL;
-                ESP_LOGI(App_FallDetection_appName().c_str(),"det_timer Delete");
+                ESP_LOGI(App_Panel_appName().c_str(),"det_timer Delete");
             }
             if(task_detect != NULL){
                 vTaskDelete(task_detect);
                 task_detect = NULL;
-                ESP_LOGI(App_FallDetection_appName().c_str(),"Detection task has been destoryed");
+                ESP_LOGI(App_Panel_appName().c_str(),"Detection task has been destoryed");
             }
             
-            //UI_LOG("[%s] Detection task has been destoryed\n", App_FallDetection_appName().c_str());
+            //UI_LOG("[%s] Detection task has been destoryed\n", App_Panel_appName().c_str());
         }
         testscreen_deinit();
-        UI_LOG("[%s] onDestroy\n", App_FallDetection_appName().c_str());
+        UI_LOG("[%s] onDestroy\n", App_Panel_appName().c_str());
     }
 
     
@@ -493,7 +483,7 @@ namespace App {
      * @brief Launcher will pass the BSP pointer through this function before onCreate
      * 
      */
-    void App_FallDetection_getBsp(void* bsp)
+    void App_Panel_getBsp(void* bsp)
     {
         device = (CHAPPIE*)bsp;
     }

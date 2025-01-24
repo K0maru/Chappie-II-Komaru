@@ -19,6 +19,8 @@
 
 #define QUEUE_LENGTH 5
 #define FILTER_WINDOW 5
+#define scr_act_height() lv_obj_get_height(lv_scr_act())
+#define scr_act_width() lv_obj_get_width(lv_scr_act())
 
 static uint8_t QueueIndex = 0;
 static float DataBuffer[FILTER_WINDOW]; 
@@ -52,16 +54,21 @@ static MPU6050_data_Filter_t Filter_receiver;
 extern bool DataCollectionEnable;
 static bool PedometerEnable = true;
 struct StepCount_t {
-    uint8_t steps = 0;
+    uint16_t steps = 0;
     uint8_t date = -1;
 };
 static I2C_BM8563_DateTypeDef rtc_date;
 static StepCount_t StepCount;
 
+lv_obj_t * lv_PM = NULL;
+//lv_obj_t * sw_data = NULL;
+lv_obj_t * sw_PM = NULL;
+lv_timer_t * PM_timer = NULL;
+
 #define ACCEL_BUFFER_SIZE 100  // 加速度数据的缓存大小（用于计算自相关）
 
-#define T_MAX 100  // 最大时间窗口
-#define T_MIN 20   // 最小时间窗口
+#define T_MAX 1100  // 最大时间窗口
+#define T_MIN 750   // 最小时间窗口
 
 float accelS[ACCEL_BUFFER_SIZE];  // 存储加速度强度数据
 float autocorr[ACCEL_BUFFER_SIZE];  // 自相关值
@@ -203,33 +210,11 @@ namespace App {
                     StepCount.steps++;  // 步数加一
                     ESP_LOGI(App_Pedometer_appName().c_str(),"Step detected! Total steps: %d",StepCount.steps);
             }
-            vTaskDelay(100);
+            vTaskDelay(best_T+10);
         }
         
     }
-    /**
-     * @brief init screen
-     */
-    static void testscreen_init()
-    {
-        _screen = new LGFX_Sprite(&device->Lcd);
-        _screen->setPsram(true);
-        _screen->createSprite(device->Lcd.width(), device->Lcd.height());
-        _screen->setTextScroll(true);
-        _screen->setTextSize(1.2);
-
-        device->Lcd.fillScreen(TFT_BLACK);
-        device->Lcd.setCursor(0, 0);
-        device->Lcd.setTextSize(1.5);
-        device->Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    }
-
-    static void testscreen_deinit()
-    {
-        _screen->deleteSprite();
-        delete _screen;
-    }    
-    /**
+        /**
      * @brief  通过UI_LOG输出任务状态
      * @param  task_handler     任务句柄
      */
@@ -264,6 +249,72 @@ namespace App {
                 break;
         }
     }
+    void PM_value_update(lv_timer_t* timer){
+
+        StepCount_t* data = (StepCount_t*)timer->user_data;
+        //ESP_LOGD("%s","Now,Yaw: %.1f",App_FallDetection_appName(),data->Yaw);
+        lv_obj_set_size(lv_PM, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_label_set_text_fmt(lv_PM, "Steps: %d", data->steps);//格式化显示输出
+        lv_obj_align(lv_PM, LV_ALIGN_LEFT_MID, 0, 0);     //显示坐标设置
+        lv_obj_invalidate(lv_PM); 
+    }
+    static void lv_sw_handler(lv_event_t *e){
+        lv_obj_t * obj = lv_event_get_target(e);
+        if(obj == sw_PM){
+            ESP_LOGI(App_Pedometer_appName().c_str(),"sw_PM handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                if(task_filter == NULL){
+                    ESP_LOGI(App_Pedometer_appName().c_str(),"Try to create Filtertask");
+                    xTaskCreatePinnedToCore(task_5Point_Filter,"Filter",5000,NULL,3,&task_filter, 0);
+                    App_Pedometer_TaskStateCheck(task_filter);
+                }
+                if(task_pedometer_handler == NULL){
+                    ESP_LOGI(App_Pedometer_appName().c_str(),"Try to create Pedometertask");
+                    xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 2, &task_pedometer_handler);
+                    App_Pedometer_TaskStateCheck(task_pedometer_handler);
+                }
+                if(PM_timer == NULL){
+                    PM_timer = lv_timer_create(PM_value_update,1000,&StepCount);
+                }
+                PedometerEnable = true;
+            }
+            else{
+                PedometerEnable = false;
+                lv_timer_del(PM_timer);
+                PM_timer = NULL;
+                ESP_LOGI(App_Pedometer_appName().c_str(),"PM_timer has been detected");
+                vTaskDelete(task_pedometer_handler);
+                task_pedometer_handler = NULL;
+                ESP_LOGI(App_Pedometer_appName().c_str(),"task_pedometer has been detected");
+                vTaskDelete(task_filter);
+                task_filter = NULL;
+                ESP_LOGI(App_Pedometer_appName().c_str(),"task_filter has been detected");
+            }
+        }
+    }
+    /**
+     * @brief init screen
+     */
+    static void testscreen_init()
+    {
+        _screen = new LGFX_Sprite(&device->Lcd);
+        _screen->setPsram(true);
+        _screen->createSprite(device->Lcd.width(), device->Lcd.height());
+        _screen->setTextScroll(true);
+        _screen->setTextSize(1.2);
+
+        device->Lcd.fillScreen(TFT_BLACK);
+        device->Lcd.setCursor(0, 0);
+        device->Lcd.setTextSize(1.5);
+        device->Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    }
+
+    static void testscreen_deinit()
+    {
+        _screen->deleteSprite();
+        delete _screen;
+    }    
+
 
 
 
@@ -296,6 +347,48 @@ namespace App {
         }
         delay(10);
     }
+    static void App_Pedometer_tileview(void)
+    {
+        lv_obj_t * tv = lv_tileview_create(lv_scr_act());
+
+        /*Tile1: 显示跌倒次数和开关*/
+        lv_obj_t * tile1 = lv_tileview_add_tile(tv, 0, 0, LV_DIR_BOTTOM);
+        //sw_data = lv_switch_create(tile1);
+        
+        //sw_PM = lv_switch_create(tile1);
+        
+        lv_obj_t * label = NULL;
+
+        /* 基础对象（矩形背景） */
+        lv_obj_t *obj_PM = lv_obj_create(tile1);                               /* 创建基础对象 */
+        lv_obj_set_size(obj_PM,scr_act_height() / 2, scr_act_height() / 2 );          /* 设置大小 */
+        lv_obj_align(obj_PM, LV_ALIGN_CENTER, -scr_act_width() / 4, 0 );              /* 设置位置 */
+
+
+        /* 开关标签 */
+        lv_obj_t *label_det = lv_label_create(obj_PM);                               /* 创建标签 */
+        lv_label_set_text(label_det, "Detection");                                          /* 设置文本内容 */
+        lv_obj_align(label_det, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );          /* 设置位置 */
+
+        /* 开关 */
+        sw_PM = lv_switch_create(obj_PM);                                       /* 创建开关 */
+        lv_obj_set_size(sw_PM,scr_act_height() / 6, scr_act_height() / 12 );      /* 设置大小 */
+        lv_obj_align(sw_PM, LV_ALIGN_CENTER, 0, scr_act_height() / 16 );          /* 设置位置 */
+        if(PedometerEnable){lv_obj_add_state(sw_PM,LV_STATE_CHECKED);}
+        lv_obj_add_event_cb(sw_PM, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
+
+        /* 基础对象（矩形背景） */
+        lv_obj_t *obj_data = lv_obj_create(tile1);
+        lv_obj_set_size(obj_data,scr_act_height() / 2, scr_act_height() / 2 );
+        lv_obj_align(obj_data, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
+
+        //lv_obj_center(sw_PM);
+        /*Tile2：实时显示调试信息*/
+        lv_obj_t * tile2 = lv_tileview_add_tile(tv, 0, 1, LV_DIR_TOP);
+        lv_PM = lv_label_create(tile2);
+        
+        PM_timer = lv_timer_create(PM_value_update,20,&StepCount);
+    }
     /**
      * @brief Called when App is on create
      * 
@@ -308,19 +401,8 @@ namespace App {
         static bool falldown = false;
         device->Rtc.getDate(&rtc_date);
         testscreen_init();
-        if (!imu_inited) {
-            device->Lcd.printf("Init IMU...\n");
-            ESP_LOGI(App_Pedometer_appName().c_str(),"Imu not init");
-            //UI_LOG("[%s] Imu not init\n", App_Pedometer_appName().c_str());
-            imu_inited = true;
-            device->Imu.init();
-        }
-        else{
-            ESP_LOGI(App_Pedometer_appName().c_str(),"Imu already inited");
-            //UI_LOG("[%s] Imu already inited\n", App_Pedometer_appName().c_str());
-        }
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
-        if(task_mpu == NULL && DataCollectionEnable){
+        if(task_mpu == NULL){
             ESP_LOGI(App_Pedometer_appName().c_str(),"Try to create MPUtask");
             //UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
             xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
@@ -340,20 +422,22 @@ namespace App {
             App_Pedometer_TaskStateCheck(task_pedometer_handler);
             device->Lcd.printf("Pedometer task has been created");
         }
-        while (1) {
-            task_UI_loop();
-            //ESP_LOGI("UI","is looping");
-            if (device->Button.B.pressed()){
-                UI_LOG("[%s] Button has been pressed\n", App_Pedometer_appName().c_str());
-                break;
-            }
-            //delay(10);
-        }
-        testscreen_deinit();
+        
+        App_Pedometer_tileview();
+        // while (1) {
+        //     task_UI_loop();
+        //     //ESP_LOGI("UI","is looping");
+        //     if (device->Button.B.pressed()){
+        //         UI_LOG("[%s] Button has been pressed\n", App_Pedometer_appName().c_str());
+        //         break;
+        //     }
+        //     //delay(10);
+        // }
+        // testscreen_deinit();
 
-        lv_obj_t * label = lv_label_create(lv_scr_act());
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-        lv_label_set_text(label, "Press B again to quit");      
+        // lv_obj_t * label = lv_label_create(lv_scr_act());
+        // lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        // lv_label_set_text(label, "Press B again to quit");      
     }
 
 
@@ -375,26 +459,35 @@ namespace App {
      */
     void App_Pedometer_onDestroy()
     {
-        UI_LOG("[%s] onDestroy\n", App_Pedometer_appName().c_str());
+        
+        
         /*在选择关闭检测功能的情况下再删除task，不关闭的情况下要保持该task*/
-        // if(PedometerEnable == false){
-        //     vTaskDelete(task_pedometer_handler);
-        //     task_pedometer_handler = NULL;
-        //     ESP_LOGI(App_Pedometer_appName().c_str(),"Pedometer task has been destoryed");
-        //     vTaskDelete(task_filter);
-        //     task_filter = NULL;
-        //     ESP_LOGI(App_Pedometer_appName().c_str(),"Filter task has been destoryed");
-        //     //UI_LOG("[%s] Pedometer task has been destoryed\n", App_Pedometer_appName().c_str());
-        // }
-        vTaskDelete(task_pedometer_handler);
-        task_pedometer_handler = NULL;
-        ESP_LOGI(App_Pedometer_appName().c_str(),"Pedometer task has been destoryed");
-        vTaskDelete(task_filter);
-        task_filter = NULL;
-        ESP_LOGI(App_Pedometer_appName().c_str(),"Filter task has been destoryed");
+        if(PedometerEnable == false){
+            if(PM_timer!=NULL){
+                lv_timer_del(PM_timer);
+                PM_timer =NULL;
+                ESP_LOGI(App_Pedometer_appName().c_str(),"PM_timer has been destoryed");
+            }
+            if(task_pedometer_handler!=NULL){
+                vTaskDelete(task_pedometer_handler);
+                task_pedometer_handler = NULL;
+                ESP_LOGI(App_Pedometer_appName().c_str(),"Pedometer task has been destoryed");
+                vTaskDelete(task_filter);
+                task_filter = NULL;
+                ESP_LOGI(App_Pedometer_appName().c_str(),"Filter task has been destoryed");
+            }
+            //UI_LOG("[%s] Pedometer task has been destoryed\n", App_Pedometer_appName().c_str());
+        }
+        // vTaskDelete(task_pedometer_handler);
+        // task_pedometer_handler = NULL;
+        // ESP_LOGI(App_Pedometer_appName().c_str(),"Pedometer task has been destoryed");
+        // vTaskDelete(task_filter);
+        // task_filter = NULL;
+        // ESP_LOGI(App_Pedometer_appName().c_str(),"Filter task has been destoryed");
+        // testscreen_deinit();
+        // ESP_LOGI(App_Pedometer_appName().c_str(),"onDestroy");
         testscreen_deinit();
-        ESP_LOGI(App_Pedometer_appName().c_str(),"onDestroy");
-        //UI_LOG("[%s] onDestroy\n", App_Pedometer_appName().c_str());
+        UI_LOG("[%s] onDestroy\n", App_Pedometer_appName().c_str());
     }
 
 
