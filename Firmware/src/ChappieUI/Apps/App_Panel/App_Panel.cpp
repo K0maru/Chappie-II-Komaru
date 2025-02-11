@@ -14,6 +14,7 @@
 #include "App_Panel.h"
 #include "../../../ChappieBsp/Chappie.h"
 #include "math.h"
+#include "Panel_ui/ui.h"
 
 volatile bool GRAVITY_LOST = false;
 volatile bool GRAVITY_OVER = false;
@@ -22,8 +23,9 @@ volatile bool MOTION_LESS = false;
 
 lv_obj_t* lv_mpu;
 
-extern QueueHandle_t mpu_queue;
-extern TaskHandle_t task_mpu;
+QueueHandle_t mpu_queue;
+TaskHandle_t task_mpu;
+static QueueHandle_t Filter_queue;
 struct MPU6050_data_t {
     float Yaw;
     float Pitch;
@@ -34,28 +36,71 @@ struct MPU6050_data_t {
     float accelS;
     float accelXZ;
 };
+struct MPU6050_data_Filter_t {
+    float accelS;
+};
 static MPU6050_data_t MPU6050_data;
 static MPU6050_data_t MPU6050_data_receiver;
+static MPU6050_data_Filter_t Filter_sender;
+static MPU6050_data_Filter_t Filter_receiver;
 
 TaskHandle_t task_detect = NULL;
 TaskHandle_t task_UI = NULL;
 TaskHandle_t task_update = NULL;
+TaskHandle_t task_pedometer_handler = NULL;
+TaskHandle_t task_filter = NULL;
+TaskHandle_t task_InactivityDetect_handler = NULL;
+
 static std::string app_name = "Panel";
 static CHAPPIE* device;
 static LGFX_Sprite* _screen;
 //bool DataCollectionEnable = true;
 static bool DetectionEnable = true;
-
-//lv_obj_t * sw_data = NULL;
+static bool PedometerEnable = true;
+static bool InactivityDetectEnable = true;
 lv_obj_t * sw_det = NULL;
 lv_timer_t * det_timer = NULL;
+lv_obj_t * lv_PM = NULL;
+lv_obj_t * sw_PM = NULL;
+lv_timer_t * PM_timer = NULL;
+
+#define QUEUE_LENGTH 5
+#define FILTER_WINDOW 5
 #define GRAVITY_LOST_THRESHOLD 0.6
 #define GRAVITY_OVER_THRESHOLD 2
 #define PITCH_THRESHOLD 45
 #define ROLL_THRESHOLD 45
+#define ACCEL_BUFFER_SIZE 100  // 加速度数据的缓存大小（用于计算自相关）
+#define T_MAX 1100  // 最大时间窗口
+#define T_MIN 750   // 最小时间窗口
+
 #define scr_act_height() lv_obj_get_height(lv_scr_act())
 #define scr_act_width() lv_obj_get_width(lv_scr_act())
+
+#define ACCEL_THRESHOLD 0.05   // 加速度阈值，低于这个值视为静止
+#define INACTIVITY_THRESHOLD 1800000  // 久坐阈值，单位：毫秒（30分钟）
+#define CHECK_INTERVAL 1000  // 每秒检查一次静止状态
+
+float accelS[ACCEL_BUFFER_SIZE];  // 存储加速度强度数据
+float autocorr[ACCEL_BUFFER_SIZE];  // 自相关值
+
+int current_index = 0;  // 当前加速度数据索引
+int threshold = 50;  // 自相关值的阈值，用于判断步伐周期
+
 static int looptimes = 0;
+static uint8_t QueueIndex = 0;
+static float DataBuffer[FILTER_WINDOW];
+
+unsigned long lastActivityTime = 0;  // 最后一次活动的时间
+unsigned long inactivityTime = 0;  // 累计的静止时间
+bool isIdle = false;  // 标记是否静止
+
+struct StepCount_t {
+    uint16_t steps = 0;
+    uint8_t date = -1;
+};
+static I2C_BM8563_DateTypeDef rtc_date;
+static StepCount_t StepCount;
 
 namespace App {
 
@@ -79,6 +124,23 @@ namespace App {
     {
         return NULL;
     }
+
+    float calculate_mean(float data[], int length) {
+        float sum = 0;
+        for (int i = 0; i < length; i++) {
+            sum += data[i];
+        }
+        return sum / length;
+    }
+
+    float calculate_std(float data[], int length, float mean) {
+        float sum = 0;
+        for (int i = 0; i < length; i++) {
+            sum += (data[i] - mean) * (data[i] - mean);
+        }
+        return sqrt(sum / length);
+    }
+
     void IRAM_ATTR GravityLostInterrupt() {
         GRAVITY_LOST = true;
         UI_LOG("[%s] GRAVITY_LOST\n", App_Panel_appName().c_str());
@@ -108,7 +170,90 @@ namespace App {
         
         
     }
-    
+    /**
+     * @brief   五点滤波，每10ms采集数据，每20ms滤波
+     */
+    static void task_5Point_Filter(void* param)
+    {
+        Filter_queue = xQueueCreate(QUEUE_LENGTH,sizeof(Filter_sender));
+        ESP_LOGI(App_Panel_appName().c_str(),"Filter_queue created");
+        //UI_LOG("[%s] Filter_queue created\n", App_Panel_appName().c_str());
+        while(1){
+            if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
+                //模拟队列
+                if (QueueIndex < FILTER_WINDOW) {
+                    DataBuffer[QueueIndex] = MPU6050_data_receiver.accelXZ;
+                    QueueIndex++;
+                }
+                else {
+                    // 队列已满，覆盖最旧的数据
+                    for (int i = 0; i < FILTER_WINDOW - 1; i++) {
+                        DataBuffer[i] = DataBuffer[i + 1];
+                    }
+                    DataBuffer[FILTER_WINDOW - 1] = MPU6050_data_receiver.accelS;
+                }
+            }
+            //20ms滤波一次
+            // 计算五点滤波后的数据（即数据队列的平均值）
+            float sum = 0.0f;
+            for (int i = 0; i < FILTER_WINDOW; i++) {
+                sum += DataBuffer[i];
+            }
+            Filter_sender.accelS = sum / FILTER_WINDOW;
+            accelS[current_index] = Filter_sender.accelS;
+            current_index = (current_index + 1) % ACCEL_BUFFER_SIZE;
+            //xQueueSend(Filter_queue,&Filter_sender,portMAX_DELAY);
+            vTaskDelay(20);
+        }
+    }
+    float calculate_autocorrelation(int T, float mean) {
+        float numerator = 0.0;
+        float denominator1 = 0.0;
+        float denominator2 = 0.0;
+
+        for (int t = 0; t < T; t++) {
+            numerator += (accelS[t] - mean) * (accelS[t + T] - mean);
+            denominator1 += (accelS[t] - mean) * (accelS[t] - mean);
+            denominator2 += (accelS[t + T] - mean) * (accelS[t + T] - mean);
+        }
+
+        // 计算自相关系数
+        return numerator / (sqrt(denominator1 * denominator2));
+    }
+
+
+    static void task_pedometer(void* param)
+    {
+        if(StepCount.date != rtc_date.date){
+            StepCount.date = rtc_date.date;
+            StepCount.steps = 0;
+            ESP_LOGI(App_Panel_appName().c_str(),"Init steps for new day");
+            //UI_LOG("[%s] Init StepCount\n", App_Panel_appName().c_str());
+        }
+        while(1){
+            // 计算自相关系数
+            //float autocorr = calculate_autocorrelation(T, mean);
+            float best_autocorr = 0;
+            int best_T = T_MIN;
+
+            // 在 T_min 到 T_max 范围内查找最佳的 T
+            for (int T = T_MIN; T <= T_MAX; T++) {
+                float mean = calculate_mean(accelS, T);
+                float std = calculate_std(accelS, T, mean);
+                float autocorr = calculate_autocorrelation(T, mean);
+                if (autocorr > best_autocorr) {
+                    best_autocorr = autocorr;
+                    best_T = T;
+                }
+            }
+            if (best_autocorr > 0.93) {
+                    StepCount.steps++;  // 步数加一
+                    ESP_LOGI(App_Panel_appName().c_str(),"Step detected! Total steps: %d",StepCount.steps);
+            }
+            vTaskDelay(best_T+10);
+        }
+        
+    }
     /**
      * @brief  通过UI_LOG输出任务状态
      * @param  task_handler     任务句柄
@@ -213,19 +358,174 @@ namespace App {
         }
     }
 
+    bool isUserInactive() {
+        return abs(MPU6050_data_receiver.accelS-1) < ACCEL_THRESHOLD;  // 如果加速度强度小于阈值，认为用户静止
+    }
+
+    void triggerInactivityReminder() {
+        // 显示久坐提醒
+        lv_obj_t *label = lv_label_create(lv_scr_act());
+        lv_label_set_text(label, "Time to move!");
+        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+        
+        // 如果有振动功能，也可以触发振动提醒
+        // device->vibrate();  // 假设设备有振动功能
+    }
+
+    void checkInactivity() {
+        if (isUserInactive()) {
+            inactivityTime += CHECK_INTERVAL;  // 累计静止时间
+            if (inactivityTime >= INACTIVITY_THRESHOLD) {
+                if (!isIdle) {
+                    isIdle = true;
+                    triggerInactivityReminder();  // 超过阈值，触发提醒
+                }
+            }
+        } else {
+            inactivityTime = 0;  // 如果用户活动，重置静止时间
+            isIdle = false;
+        }
+    }
+
+    static void task_InactivityDetect(void* param){
+        while(1){
+            checkInactivity();
+            vTaskDelay(CHECK_INTERVAL);
+        }
+    }
+
     void mpu_value_update(lv_timer_t* timer){
 
         MPU6050_data_t* data = (MPU6050_data_t*)timer->user_data;
-        ESP_LOGI("DEBUG","Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);
+        //ESP_LOGI("DEBUG","Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);
         lv_obj_set_size(lv_mpu, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_label_set_text_fmt(lv_mpu, "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);//格式化显示输出
         lv_obj_align(lv_mpu, LV_ALIGN_LEFT_MID, 0, 0);     //显示坐标设置
         lv_obj_invalidate(lv_mpu); 
     }
+    void PM_value_update(lv_timer_t* timer){
+
+        StepCount_t* data = (StepCount_t*)timer->user_data;
+        //ESP_LOGD("%s","Now,Yaw: %.1f",App_FallDetection_appName(),data->Yaw);
+        lv_obj_set_size(lv_PM, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_label_set_text_fmt(lv_PM, "Steps: %d", data->steps);//格式化显示输出
+        lv_obj_align(lv_PM, LV_ALIGN_RIGHT_MID, 0, 0);     //显示坐标设置
+        lv_obj_invalidate(lv_PM); 
+    }
+    void FallDetectionEnable(){
+        /*检测线程未启动且要求启动时，创建检测线程*/
+        if(task_detect == NULL && DetectionEnable){
+            UI_LOG("[%s] try to create Detectiontask\n", App_Panel_appName().c_str());
+            xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
+            App_Panel_TaskStateCheck(task_detect);
+            //device->Lcd.printf("Detection task has been created\n");
+            UI_LOG("[%s] Detection task has been created\n", App_Panel_appName().c_str());
+        }
+    }
+    void FallDetectionDisable(){
+        if(DetectionEnable == false){
+            if(det_timer != NULL){
+                lv_timer_del(det_timer);
+                det_timer = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"det_timer Delete");
+            }
+            if(task_detect != NULL){
+                vTaskDelete(task_detect);
+                task_detect = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"Detection task has been destoryed");
+            }
+            
+            //UI_LOG("[%s] Detection task has been destoryed\n", App_Panel_appName().c_str());
+        }
+    }
+    void PedometertaskEnable(){
+        if(task_pedometer_handler == NULL && PedometerEnable){
+            ESP_LOGI(App_Panel_appName().c_str(),"Try to create Filtertask");
+            //UI_LOG("[%s] Try to create Pedometertask\n", App_Panel_appName().c_str());
+            //xTaskCreate(task_5Point_Filter,"Filter",5000,NULL,3,&task_filter);
+            xTaskCreatePinnedToCore(task_5Point_Filter,"Filter",5000,NULL,3,&task_filter, 0);
+            App_Panel_TaskStateCheck(task_filter);
+            ESP_LOGI(App_Panel_appName().c_str(),"Try to create Pedometertask");
+            xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 2, &task_pedometer_handler);
+            App_Panel_TaskStateCheck(task_pedometer_handler);
+            //device->Lcd.printf("Pedometer task has been created");
+        }
+    }
+    void PedometertaskDisable(){
+        if(PedometerEnable == false){
+            if(PM_timer!=NULL){
+                lv_timer_del(PM_timer);
+                PM_timer =NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"PM_timer has been destoryed");
+            }
+            if(task_pedometer_handler!=NULL){
+                vTaskDelete(task_pedometer_handler);
+                task_pedometer_handler = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"Pedometer task has been destoryed");
+                vTaskDelete(task_filter);
+                task_filter = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"Filter task has been destoryed");
+            }
+            //UI_LOG("[%s] Pedometer task has been destoryed\n", App_Panel_appName().c_str());
+        }
+    }
+    void InactivityDetectiontaskEnable(){
+        if(task_InactivityDetect_handler == NULL && InactivityDetectEnable){
+            ESP_LOGI(App_Panel_appName().c_str(),"Try to create Inactivity Detection task");
+            xTaskCreate(task_InactivityDetect, "Inactivity Detection", 2048, NULL, 2, &task_InactivityDetect_handler);
+            App_Panel_TaskStateCheck(task_InactivityDetect_handler);
+            //device->Lcd.printf("Inactivity Detection task has been created");
+        }
+    }
+    void InactivityDetectiontaskDisable(){
+        if(InactivityDetectEnable == false){
+            vTaskDelete(task_InactivityDetect_handler);
+            task_InactivityDetect_handler = NULL;
+            inactivityTime = 0;
+            isIdle = false;
+            ESP_LOGI(App_Panel_appName().c_str(),"InactivityDetect task has been destoryed");
+        }
+    }
     /**
      * @brief detect和collect功能开关的handler
      * @param  e                事件
      */
+    static void panel_event_cb(lv_event_t *e){
+        lv_obj_t * obj = lv_event_get_target(e);
+        if(obj == ui_ButtonFall){
+            ESP_LOGI(App_Panel_appName().c_str(),"ButtonFall handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                DetectionEnable = true;
+                FallDetectionEnable();
+            }
+            else{
+                DetectionEnable = false;
+                FallDetectionDisable();
+            }
+        }
+        if(obj == ui_ButtonSteps){
+            ESP_LOGI(App_Panel_appName().c_str(),"ButtonSteps handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                PedometerEnable = true;
+                PedometertaskEnable();
+            }
+            else{
+                PedometerEnable = false;
+                PedometertaskDisable();
+            }
+        }
+        if(obj == ui_ButtonInactivity){
+            ESP_LOGI(App_Panel_appName().c_str(),"ButtonInactivity handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                InactivityDetectEnable = true;
+                InactivityDetectiontaskEnable();
+            }
+            else{
+                InactivityDetectEnable = false;
+                InactivityDetectiontaskDisable();
+            }
+        }
+    }
     static void lv_sw_handler(lv_event_t *e){
         lv_obj_t * obj = lv_event_get_target(e);
         if(obj == sw_det){
@@ -249,24 +549,37 @@ namespace App {
                 task_detect = NULL;
             }
         }
-        // else if(obj == sw_data){
-        //     ESP_LOGI(App_Panel_appName().c_str(),"SW_datacollection handler called back");
-        //     if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
-        //         if(task_mpu == NULL){
-        //             xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
-        //             //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
-        //         }
-        //         DetectionEnable = true;
-        //         ESP_LOGI(App_Panel_appName().c_str(),"DetectionEnable set true");
-        //     }
-        //     else{
-        //         DetectionEnable = false;
-        //         ESP_LOGI(App_Panel_appName().c_str(),"DetectionEnable set false");
-        //         // vTaskDelete(task_mpu);
-        //         // ESP_LOGI(App_Panel_appName().c_str(),"task_mpu has been detected");
-        //         task_mpu = NULL;
-        //     }
-        // }
+        if(obj == sw_PM){
+            ESP_LOGI(App_Panel_appName().c_str(),"sw_PM handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
+                if(task_filter == NULL){
+                    ESP_LOGI(App_Panel_appName().c_str(),"Try to create Filtertask");
+                    xTaskCreatePinnedToCore(task_5Point_Filter,"Filter",5000,NULL,3,&task_filter, 0);
+                    App_Panel_TaskStateCheck(task_filter);
+                }
+                if(task_pedometer_handler == NULL){
+                    ESP_LOGI(App_Panel_appName().c_str(),"Try to create Pedometertask");
+                    xTaskCreate(task_pedometer, "Pedometer", 5000, NULL, 2, &task_pedometer_handler);
+                    App_Panel_TaskStateCheck(task_pedometer_handler);
+                }
+                if(PM_timer == NULL){
+                    PM_timer = lv_timer_create(PM_value_update,1000,&StepCount);
+                }
+                PedometerEnable = true;
+            }
+            else{
+                PedometerEnable = false;
+                lv_timer_del(PM_timer);
+                PM_timer = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"PM_timer has been detected");
+                vTaskDelete(task_pedometer_handler);
+                task_pedometer_handler = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"task_pedometer has been detected");
+                vTaskDelete(task_filter);
+                task_filter = NULL;
+                ESP_LOGI(App_Panel_appName().c_str(),"task_filter has been detected");
+            }
+        }
     }
 
 /*----------------------------------------------------UI&DEVICE-------------------------------------------------------------------*/
@@ -367,29 +680,30 @@ namespace App {
         lv_obj_add_event_cb(sw_det, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
 
         /* 基础对象（矩形背景） */
-        // lv_obj_t *obj_data = lv_obj_create(tile1);
-        // lv_obj_set_size(obj_data,scr_act_height() / 2, scr_act_height() / 2 );
-        // lv_obj_align(obj_data, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
+        lv_obj_t *obj_PM = lv_obj_create(tile1);
+        lv_obj_set_size(obj_PM,scr_act_height() / 2, scr_act_height() / 2 );
+        lv_obj_align(obj_PM, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
 
         /* 开关标签 */
-        // lv_obj_t *label_data = lv_label_create(obj_data);
-        // lv_label_set_text(label_data, "Collection");
-        // lv_obj_align(label_data, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );
+        lv_obj_t *label_data = lv_label_create(obj_PM);
+        lv_label_set_text(label_data, "Pedometer");
+        lv_obj_align(label_data, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );
 
 
         /* 开关 */
-        // sw_data = lv_switch_create(obj_data);
-        // lv_obj_set_size(sw_data ,scr_act_height() / 6, scr_act_height() / 12 );
-        // lv_obj_align(sw_data , LV_ALIGN_CENTER, 0, scr_act_height() / 16 );
-        // //if(DataCollectionEnable){lv_obj_add_state(sw_data,LV_STATE_CHECKED);}
-        // lv_obj_add_event_cb(sw_data, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
+        sw_PM = lv_switch_create(obj_PM);
+        lv_obj_set_size(sw_PM ,scr_act_height() / 6, scr_act_height() / 12 );
+        lv_obj_align(sw_PM , LV_ALIGN_CENTER, 0, scr_act_height() / 16 );
+        if(PedometerEnable){lv_obj_add_state(sw_PM,LV_STATE_CHECKED);}
+        lv_obj_add_event_cb(sw_PM, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
 
         //lv_obj_center(sw_det);
         /*Tile2：实时显示调试信息*/
         lv_obj_t * tile2 = lv_tileview_add_tile(tv, 0, 1, LV_DIR_TOP);
         lv_mpu = lv_label_create(tile2);
-        
+        lv_PM = lv_label_create(tile2);
         det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
+        PM_timer = lv_timer_create(PM_value_update,30,&StepCount); 
     }
     /**
      * @brief Called when App is on create
@@ -399,45 +713,56 @@ namespace App {
     {
         UI_LOG("[%s] onCreate\n", App_Panel_appName().c_str());
         
-        static bool falldown = false;
+        //static bool falldown = false;
         testscreen_init();
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
         if(task_mpu == NULL){
             ESP_LOGI(App_Panel_appName().c_str(),"Try to create MPUtask");
-            //UI_LOG("[%s] Try to create MPUtask\n", App_Pedometer_appName().c_str());
+            //UI_LOG("[%s] Try to create MPUtask\n", App_Panel_appName().c_str());
             xTaskCreatePinnedToCore(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu, 0);
             //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
             App_Panel_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
-            //UI_LOG("[%s] Data collection task has been created\n", App_Pedometer_appName().c_str());
+            //UI_LOG("[%s] Data collection task has been created\n", App_Panel_appName().c_str());
         }
         /*检测线程未启动且要求启动时，创建检测线程*/
-        if(task_detect == NULL && DetectionEnable){
-            UI_LOG("[%s] try to create Detectiontask\n", App_Panel_appName().c_str());
+        FallDetectionEnable();
+        device->Lcd.printf("Detection task has been created\n");
+        PedometertaskEnable();
+        device->Lcd.printf("Pedometer task has been created");
+        InactivityDetectiontaskEnable();
+        device->Lcd.printf("Inactivity Detection task has been created");
 
-            xTaskCreate(task_falldetect, "MPU6050_DET", 1024*16, NULL, 4, &task_detect);
-            App_Panel_TaskStateCheck(task_detect);
-            device->Lcd.printf("Detection task has been created\n");
-            UI_LOG("[%s] Detection task has been created\n", App_Panel_appName().c_str());
+        device->lvgl.disable();
+
+        /* Reinit lvgl to free resources */
+        lv_deinit();
+        device->lvgl.init(&device->Lcd, &device->Tp);
+
+        /* Init launcher UI */
+        Panel_ui_init();
+        lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x4D5B74), LV_PART_MAIN | LV_STATE_DEFAULT);
+        //lv_scr_load_anim(ui_Screen1, LV_SCR_LOAD_ANIM_FADE_IN, 250, 0, true);
+        /* Desktop init */
+        lv_obj_set_scroll_snap_y(ui_AppDesktop, LV_SCROLL_SNAP_CENTER);
+        //lv_obj_update_snap(ui_AppDesktop, LV_ANIM_ON);
+        /* Add ui event call back */
+        lv_obj_add_event_cb(ui_ButtonFall, panel_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(ui_ButtonSteps, panel_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(ui_ButtonInactivity, panel_event_cb, LV_EVENT_CLICKED, NULL);
+
+        if (DetectionEnable) {
+            lv_obj_add_state(ui_ButtonFall, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
         }
+        if (PedometerEnable) {
+            lv_obj_add_state(ui_ButtonSteps, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+        }
+        if (InactivityDetectEnable) {
+            lv_obj_add_state(ui_ButtonInactivity, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+        }
+        device->lvgl.enable();
+        //App_Panel_tileview();
 
-        
-        App_Panel_tileview();
-        // while (1) {
-        //     task_UI_loop();
-        //     if (device->Button.B.pressed()){
-        //         UI_LOG("[%s] Button has been pressed\n", App_Panel_appName().c_str());
-        //         //vTaskDelete(task_UI);
-                
-        //         break;
-        //     }
-        //     //delay(10);
-        // }
-        // testscreen_deinit();
-
-        // lv_obj_t * label = lv_label_create(lv_scr_act());
-        // lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-        // lv_label_set_text(label, "Press B again to quit");
     }
 
 
@@ -460,20 +785,9 @@ namespace App {
     void App_Panel_onDestroy()
     {
         /*在选择关闭检测功能的情况下再删除task，不关闭的情况下要保持该task*/
-        if(DetectionEnable == false){
-            if(det_timer != NULL){
-                lv_timer_del(det_timer);
-                det_timer = NULL;
-                ESP_LOGI(App_Panel_appName().c_str(),"det_timer Delete");
-            }
-            if(task_detect != NULL){
-                vTaskDelete(task_detect);
-                task_detect = NULL;
-                ESP_LOGI(App_Panel_appName().c_str(),"Detection task has been destoryed");
-            }
-            
-            //UI_LOG("[%s] Detection task has been destoryed\n", App_Panel_appName().c_str());
-        }
+        FallDetectionDisable();
+        PedometertaskDisable();
+        InactivityDetectiontaskDisable();
         testscreen_deinit();
         UI_LOG("[%s] onDestroy\n", App_Panel_appName().c_str());
     }

@@ -13,7 +13,7 @@
 #if 1
 #include "App_SedentaryDetection.h"
 #include "../../../ChappieBsp/Chappie.h"
-
+#include <math.h>
 
 static std::string app_name = "SedentaryDetection";
 static CHAPPIE* device;

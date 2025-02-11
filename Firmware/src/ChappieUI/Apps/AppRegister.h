@@ -71,7 +71,7 @@ namespace App {
 		App_Login(WifiTV),
 		//App_Login(Gamepad),
 		//App_Login(FallDetection),
-		App_Login(Pedometer),
+		//App_Login(Pedometer),
 		App_Login(SedentaryDetection),
 		App_Login(Panel),
 		/* Login locator */
