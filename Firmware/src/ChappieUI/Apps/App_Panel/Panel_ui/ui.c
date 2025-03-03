@@ -37,11 +37,17 @@ lv_obj_t * ui_StepcountChart;
 lv_obj_t * ui_AppInactivity;
 lv_obj_t * ui_PanelInactivity;
 lv_obj_t * ui_InactivityDetection;
-lv_obj_t * ui_Switch4;
-lv_obj_t * ui_ArcSteps3;
+lv_obj_t * ui_SwitchInactivity;
+lv_obj_t * ui_ArcInactivitycount;
 lv_obj_t * ui_ChartInactivity;
 lv_obj_t * ui_LabelInactivitycount;
 lv_obj_t * ui_AppTestpage;
+lv_obj_t * ui_PanelMPU;
+lv_obj_t * ui_LabelMPUYAW;
+lv_obj_t * ui_LabelMPURoll;
+lv_obj_t * ui_LabelMPUPitch;
+lv_obj_t * ui_LabelMPUAS;
+lv_obj_t * ui_LabelMPUSteps;
 lv_obj_t * ui_ImageBattery;
 lv_obj_t * ui_LabelTime;
 lv_obj_t * ui_ImageBatterybar;
@@ -52,7 +58,7 @@ lv_obj_t * ui_BatteryBar;
 lv_obj_t * ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
-//const lv_img_dsc_t * ui_imgset_img_icon_test[2] = {&ui_img_img_icon_test1_png, &ui_img_img_icon_test2_png};
+
 
 ///////////////////// TEST LVGL SETTINGS ////////////////////
 #if LV_COLOR_DEPTH != 16

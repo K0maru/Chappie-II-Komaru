@@ -398,20 +398,32 @@ namespace App {
 
         MPU6050_data_t* data = (MPU6050_data_t*)timer->user_data;
         //ESP_LOGI("DEBUG","Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);
-        lv_obj_set_size(lv_mpu, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_label_set_text_fmt(lv_mpu, "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);//格式化显示输出
-        lv_obj_align(lv_mpu, LV_ALIGN_LEFT_MID, 0, 0);     //显示坐标设置
-        lv_obj_invalidate(lv_mpu); 
+        //lv_obj_set_size(lv_mpu, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        //lv_label_set_text_fmt(lv_mpu, "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f\nAS: %.2f", data->Yaw,data->Pitch,data->Roll,data->accelS);//格式化显示输出
+        //lv_obj_align(lv_mpu, LV_ALIGN_LEFT_MID, 0, 0);     //显示坐标设置
+        //lv_obj_invalidate(lv_mpu); 
+        lv_label_set_text_fmt(ui_LabelMPUYAW,"Yaw: %.2f",data->Yaw);
+        //lv_obj_invalidate(ui_LabelMPUYAW);
+        lv_label_set_text_fmt(ui_LabelMPURoll,"Roll: %.2f",data->Roll);
+        lv_label_set_text_fmt(ui_LabelMPUPitch,"Pitch: %.2f",data->Pitch);
+        lv_label_set_text_fmt(ui_LabelMPUAS,"AS: %.2f",data->accelS);
+
     }
     void PM_value_update(lv_timer_t* timer){
 
         StepCount_t* data = (StepCount_t*)timer->user_data;
         //ESP_LOGD("%s","Now,Yaw: %.1f",App_FallDetection_appName(),data->Yaw);
-        lv_obj_set_size(lv_PM, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_label_set_text_fmt(lv_PM, "Steps: %d", data->steps);//格式化显示输出
-        lv_obj_align(lv_PM, LV_ALIGN_RIGHT_MID, 0, 0);     //显示坐标设置
-        lv_obj_invalidate(lv_PM); 
+        //lv_obj_set_size(lv_PM, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_label_set_text_fmt(ui_LabelStepcount,"%d",data->steps);//格式化显示输出
+        lv_arc_set_value(ui_ArcPedometer,data->steps);
+        lv_arc_set_value(ui_ArcSteps,data->steps);
+        //lv_label_set_text_fmt(lv_PM, "Steps: %d", data->steps);//格式化显示输出
+        //lv_obj_align(lv_PM, LV_ALIGN_RIGHT_MID, 0, 0);     //显示坐标设置
+        //lv_obj_invalidate(lv_PM); 
     }
+    /**
+     * @brief 计步/跌倒检测/久坐检测 功能启用/关闭
+     */
     void FallDetectionEnable(){
         /*检测线程未启动且要求启动时，创建检测线程*/
         if(task_detect == NULL && DetectionEnable){
@@ -487,8 +499,8 @@ namespace App {
         }
     }
     /**
-     * @brief detect和collect功能开关的handler
-     * @param  e                事件
+     * @brief  三个功能按钮和开关的回调，以及对应按钮和开关的互锁
+     * @param  e ui触发事件
      */
     static void panel_event_cb(lv_event_t *e){
         lv_obj_t * obj = lv_event_get_target(e);
@@ -496,10 +508,12 @@ namespace App {
             ESP_LOGI(App_Panel_appName().c_str(),"ButtonFall handler called back");
             if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
                 DetectionEnable = true;
+                lv_obj_add_state(ui_SwitchFallDetection,LV_STATE_CHECKED);
                 FallDetectionEnable();
             }
             else{
                 DetectionEnable = false;
+                if(lv_obj_has_state(ui_SwitchFallDetection,LV_STATE_CHECKED)) lv_obj_clear_state(ui_SwitchFallDetection,LV_STATE_CHECKED);
                 FallDetectionDisable();
             }
         }
@@ -507,10 +521,12 @@ namespace App {
             ESP_LOGI(App_Panel_appName().c_str(),"ButtonSteps handler called back");
             if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
                 PedometerEnable = true;
+                lv_obj_add_state(ui_SwitchPedometer,LV_STATE_CHECKED);
                 PedometertaskEnable();
             }
             else{
                 PedometerEnable = false;
+                if(lv_obj_has_state(ui_SwitchPedometer,LV_STATE_CHECKED)) lv_obj_clear_state(ui_SwitchPedometer,LV_STATE_CHECKED);
                 PedometertaskDisable();
             }
         }
@@ -518,11 +534,52 @@ namespace App {
             ESP_LOGI(App_Panel_appName().c_str(),"ButtonInactivity handler called back");
             if (lv_obj_get_state(obj) == (LV_STATE_CHECKED | LV_STATE_FOCUSED)) {
                 InactivityDetectEnable = true;
+                lv_obj_add_state(ui_SwitchInactivity,LV_STATE_CHECKED);
                 InactivityDetectiontaskEnable();
             }
             else{
                 InactivityDetectEnable = false;
+                if(lv_obj_has_state(ui_SwitchInactivity,LV_STATE_CHECKED)) lv_obj_clear_state(ui_SwitchInactivity,LV_STATE_CHECKED);
                 InactivityDetectiontaskDisable();
+            }
+        }
+        if(obj == ui_SwitchFallDetection){
+            ESP_LOGI(App_Panel_appName().c_str(),"SwitchFall handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED)) {
+                DetectionEnable = true;
+                lv_obj_add_state(ui_ButtonFall,(LV_STATE_CHECKED | LV_STATE_FOCUSED));
+                FallDetectionEnable();
+            }
+            else{
+                DetectionEnable = false;
+                if(lv_obj_has_state(ui_ButtonFall,(LV_STATE_CHECKED | LV_STATE_FOCUSED))) lv_obj_clear_state(ui_ButtonFall,(LV_STATE_CHECKED | LV_STATE_FOCUSED));
+                FallDetectionDisable();
+            }
+        }
+        if(obj == ui_SwitchInactivity){
+            ESP_LOGI(App_Panel_appName().c_str(),"SwitchInactivity handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED)) {
+                InactivityDetectEnable = true;
+                lv_obj_add_state(ui_ButtonInactivity,(LV_STATE_CHECKED | LV_STATE_FOCUSED));
+                InactivityDetectiontaskEnable();
+            }
+            else{
+                InactivityDetectEnable = false;
+                if(lv_obj_has_state(ui_ButtonInactivity,(LV_STATE_CHECKED | LV_STATE_FOCUSED))) lv_obj_clear_state(ui_ButtonInactivity,(LV_STATE_CHECKED | LV_STATE_FOCUSED));
+                InactivityDetectiontaskDisable();
+            }
+        }
+        if(obj == ui_SwitchPedometer){
+            ESP_LOGI(App_Panel_appName().c_str(),"SwitchPedometer handler called back");
+            if (lv_obj_get_state(obj) == (LV_STATE_CHECKED)) {
+                PedometerEnable = true;
+                lv_obj_add_state(ui_ButtonSteps,(LV_STATE_CHECKED | LV_STATE_FOCUSED));
+                PedometertaskEnable();
+            }
+            else{
+                PedometerEnable = true;
+                if(lv_obj_has_state(ui_ButtonSteps,(LV_STATE_CHECKED | LV_STATE_FOCUSED))) lv_obj_clear_state(ui_ButtonSteps,(LV_STATE_CHECKED | LV_STATE_FOCUSED));
+                PedometertaskEnable();
             }
         }
     }
@@ -742,6 +799,17 @@ namespace App {
         /* Init launcher UI */
         Panel_ui_init();
         lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x4D5B74), LV_PART_MAIN | LV_STATE_DEFAULT);
+        /*初始化标签数据*/
+        lv_label_set_text_fmt(ui_LabelStepcount,"%d",0);
+        lv_label_set_text_fmt(ui_LabelFallcount,"%d",0);
+        lv_label_set_text_fmt(ui_LabelInactivitycount,"%d",0);
+        /*初始化圆弧*/
+        lv_arc_set_value(ui_ArcPedometer,0);
+        lv_arc_set_value(ui_ArcSteps,0);
+        lv_arc_set_value(ui_ArcFall,0);
+        lv_arc_set_value(ui_ArcFalldetection,0);
+        lv_arc_set_value(ui_ArcInactivity,0);
+        lv_arc_set_value(ui_ArcInactivitycount,0);
         //lv_scr_load_anim(ui_Screen1, LV_SCR_LOAD_ANIM_FADE_IN, 250, 0, true);
         /* Desktop init */
         lv_obj_set_scroll_snap_y(ui_AppDesktop, LV_SCROLL_SNAP_CENTER);
@@ -750,15 +818,24 @@ namespace App {
         lv_obj_add_event_cb(ui_ButtonFall, panel_event_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(ui_ButtonSteps, panel_event_cb, LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(ui_ButtonInactivity, panel_event_cb, LV_EVENT_CLICKED, NULL);
-
+        lv_obj_add_event_cb(ui_SwitchFallDetection, panel_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(ui_SwitchInactivity, panel_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(ui_SwitchPedometer, panel_event_cb, LV_EVENT_CLICKED, NULL);
+        
+        det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
+        PM_timer = lv_timer_create(PM_value_update,30,&StepCount); 
+        
         if (DetectionEnable) {
             lv_obj_add_state(ui_ButtonFall, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+            lv_obj_add_state(ui_SwitchFallDetection,(LV_STATE_CHECKED));
         }
         if (PedometerEnable) {
             lv_obj_add_state(ui_ButtonSteps, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+            lv_obj_add_state(ui_SwitchPedometer,(LV_STATE_CHECKED));
         }
         if (InactivityDetectEnable) {
             lv_obj_add_state(ui_ButtonInactivity, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
+            lv_obj_add_state(ui_SwitchInactivity,(LV_STATE_CHECKED));
         }
         device->lvgl.enable();
         //App_Panel_tileview();

@@ -5,13 +5,13 @@
 
 #include "ui_helpers.h"
 
-void _Panel_UI_bar_set_property(lv_obj_t * target, int id, int val)
+void _Panel_ui_bar_set_property(lv_obj_t * target, int id, int val)
 {
     if(id == _Panel_UI_BAR_PROPERTY_VALUE_WITH_ANIM) lv_bar_set_value(target, val, LV_ANIM_ON);
     if(id == _Panel_UI_BAR_PROPERTY_VALUE) lv_bar_set_value(target, val, LV_ANIM_OFF);
 }
 
-void _Panel_UI_basic_set_property(lv_obj_t * target, int id, int val)
+void _Panel_ui_basic_set_property(lv_obj_t * target, int id, int val)
 {
     if(id == _Panel_UI_BASIC_PROPERTY_POSITION_X) lv_obj_set_x(target, val);
     if(id == _Panel_UI_BASIC_PROPERTY_POSITION_Y) lv_obj_set_y(target, val);
@@ -20,43 +20,43 @@ void _Panel_UI_basic_set_property(lv_obj_t * target, int id, int val)
 }
 
 
-void _Panel_UI_dropdown_set_property(lv_obj_t * target, int id, int val)
+void _Panel_ui_dropdown_set_property(lv_obj_t * target, int id, int val)
 {
     if(id == _Panel_UI_DROPDOWN_PROPERTY_SELECTED) lv_dropdown_set_selected(target, val);
 }
 
-void _Panel_UI_image_set_property(lv_obj_t * target, int id, uint8_t * val)
+void _Panel_ui_image_set_property(lv_obj_t * target, int id, uint8_t * val)
 {
     if(id == _Panel_UI_IMAGE_PROPERTY_IMAGE) lv_img_set_src(target, val);
 }
 
-void _Panel_UI_label_set_property(lv_obj_t * target, int id, const char * val)
+void _Panel_ui_label_set_property(lv_obj_t * target, int id, const char * val)
 {
     if(id == _Panel_UI_LABEL_PROPERTY_TEXT) lv_label_set_text(target, val);
 }
 
 
-void _Panel_UI_roller_set_property(lv_obj_t * target, int id, int val)
+void _Panel_ui_roller_set_property(lv_obj_t * target, int id, int val)
 {
     if(id == _Panel_UI_ROLLER_PROPERTY_SELECTED_WITH_ANIM) lv_roller_set_selected(target, val, LV_ANIM_ON);
     if(id == _Panel_UI_ROLLER_PROPERTY_SELECTED) lv_roller_set_selected(target, val, LV_ANIM_OFF);
 }
 
-void _Panel_UI_slider_set_property(lv_obj_t * target, int id, int val)
+void _Panel_ui_slider_set_property(lv_obj_t * target, int id, int val)
 {
     if(id == _Panel_UI_SLIDER_PROPERTY_VALUE_WITH_ANIM) lv_slider_set_value(target, val, LV_ANIM_ON);
     if(id == _Panel_UI_SLIDER_PROPERTY_VALUE) lv_slider_set_value(target, val, LV_ANIM_OFF);
 }
 
 
-void _Panel_UI_screen_change(lv_obj_t ** target, lv_scr_load_anim_t fademode, int spd, int delay, void (*target_init)(void))
+void _Panel_ui_screen_change(lv_obj_t ** target, lv_scr_load_anim_t fademode, int spd, int delay, void (*target_init)(void))
 {
     if(*target == NULL)
         target_init();
     lv_scr_load_anim(*target, fademode, spd, delay, false);
 }
 
-void _Panel_UI_screen_delete(lv_obj_t ** target)
+void _Panel_ui_screen_delete(lv_obj_t ** target)
 {
     if(*target == NULL) {
         lv_obj_del(*target);
@@ -64,32 +64,32 @@ void _Panel_UI_screen_delete(lv_obj_t ** target)
     }
 }
 
-void _Panel_UI_arc_increment(lv_obj_t * target, int val)
+void _Panel_ui_arc_increment(lv_obj_t * target, int val)
 {
     int old = lv_arc_get_value(target);
     lv_arc_set_value(target, old + val);
     lv_event_send(target, LV_EVENT_VALUE_CHANGED, 0);
 }
 
-void _Panel_UI_bar_increment(lv_obj_t * target, int val, int anm)
+void _Panel_ui_bar_increment(lv_obj_t * target, int val, int anm)
 {
     int old = lv_bar_get_value(target);
     lv_bar_set_value(target, old + val, anm);
 }
 
-void _Panel_UI_slider_increment(lv_obj_t * target, int val, int anm)
+void _Panel_ui_slider_increment(lv_obj_t * target, int val, int anm)
 {
     int old = lv_slider_get_value(target);
     lv_slider_set_value(target, old + val, anm);
     lv_event_send(target, LV_EVENT_VALUE_CHANGED, 0);
 }
 
-void _Panel_UI_keyboard_set_target(lv_obj_t * keyboard, lv_obj_t * textarea)
+void _Panel_ui_keyboard_set_target(lv_obj_t * keyboard, lv_obj_t * textarea)
 {
     lv_keyboard_set_textarea(keyboard, textarea);
 }
 
-void _Panel_UI_flag_modify(lv_obj_t * target, int32_t flag, int value)
+void _Panel_ui_flag_modify(lv_obj_t * target, int32_t flag, int value)
 {
     if(value == _Panel_UI_MODIFY_FLAG_TOGGLE) {
         if(lv_obj_has_flag(target, flag)) lv_obj_clear_flag(target, flag);
@@ -98,7 +98,7 @@ void _Panel_UI_flag_modify(lv_obj_t * target, int32_t flag, int value)
     else if(value == _Panel_UI_MODIFY_FLAG_ADD) lv_obj_add_flag(target, flag);
     else lv_obj_clear_flag(target, flag);
 }
-void _Panel_UI_state_modify(lv_obj_t * target, int32_t state, int value)
+void _Panel_ui_state_modify(lv_obj_t * target, int32_t state, int value)
 {
     if(value == _Panel_UI_MODIFY_STATE_TOGGLE) {
         if(lv_obj_has_state(target, state)) lv_obj_clear_state(target, state);
@@ -109,7 +109,7 @@ void _Panel_UI_state_modify(lv_obj_t * target, int32_t state, int value)
 }
 
 
-void _Panel_UI_textarea_move_cursor(lv_obj_t * target, int val)
+void _Panel_ui_textarea_move_cursor(lv_obj_t * target, int val)
 
 {
 
@@ -130,18 +130,18 @@ void scr_unloaded_delete_cb(lv_event_t * e)
 
 }
 
-void _Panel_UI_opacity_set(lv_obj_t * target, int val)
+void _Panel_ui_opacity_set(lv_obj_t * target, int val)
 {
     lv_obj_set_style_opa(target, val, 0);
 }
 
-void _Panel_UI_anim_callback_free_user_data(lv_anim_t * a)
+void _Panel_ui_anim_callback_free_user_data(lv_anim_t * a)
 {
     lv_mem_free(a->user_data);
     a->user_data = NULL;
 }
 
-void _Panel_UI_anim_callback_set_x(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_x(lv_anim_t * a, int32_t v)
 
 {
 
@@ -151,7 +151,7 @@ void _Panel_UI_anim_callback_set_x(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_y(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_y(lv_anim_t * a, int32_t v)
 
 {
 
@@ -161,7 +161,7 @@ void _Panel_UI_anim_callback_set_y(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_width(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_width(lv_anim_t * a, int32_t v)
 
 {
 
@@ -171,7 +171,7 @@ void _Panel_UI_anim_callback_set_width(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_height(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_height(lv_anim_t * a, int32_t v)
 
 {
 
@@ -181,7 +181,7 @@ void _Panel_UI_anim_callback_set_height(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_opacity(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_opacity(lv_anim_t * a, int32_t v)
 
 {
 
@@ -191,7 +191,7 @@ void _Panel_UI_anim_callback_set_opacity(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_image_zoom(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_image_zoom(lv_anim_t * a, int32_t v)
 
 {
 
@@ -201,7 +201,7 @@ void _Panel_UI_anim_callback_set_image_zoom(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_image_angle(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_image_angle(lv_anim_t * a, int32_t v)
 
 {
 
@@ -211,7 +211,7 @@ void _Panel_UI_anim_callback_set_image_angle(lv_anim_t * a, int32_t v)
 }
 
 
-void _Panel_UI_anim_callback_set_image_frame(lv_anim_t * a, int32_t v)
+void _Panel_ui_anim_callback_set_image_frame(lv_anim_t * a, int32_t v)
 
 {
 
@@ -223,7 +223,7 @@ void _Panel_UI_anim_callback_set_image_frame(lv_anim_t * a, int32_t v)
     lv_img_set_src(usr->target, usr->imgset[v]);
 }
 
-int32_t _Panel_UI_anim_callback_get_x(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_x(lv_anim_t * a)
 
 {
 
@@ -233,7 +233,7 @@ int32_t _Panel_UI_anim_callback_get_x(lv_anim_t * a)
 }
 
 
-int32_t _Panel_UI_anim_callback_get_y(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_y(lv_anim_t * a)
 
 {
 
@@ -243,7 +243,7 @@ int32_t _Panel_UI_anim_callback_get_y(lv_anim_t * a)
 }
 
 
-int32_t _Panel_UI_anim_callback_get_width(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_width(lv_anim_t * a)
 
 {
 
@@ -253,7 +253,7 @@ int32_t _Panel_UI_anim_callback_get_width(lv_anim_t * a)
 }
 
 
-int32_t _Panel_UI_anim_callback_get_height(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_height(lv_anim_t * a)
 
 {
 
@@ -263,7 +263,7 @@ int32_t _Panel_UI_anim_callback_get_height(lv_anim_t * a)
 }
 
 
-int32_t _Panel_UI_anim_callback_get_opacity(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_opacity(lv_anim_t * a)
 
 {
 
@@ -272,7 +272,7 @@ int32_t _Panel_UI_anim_callback_get_opacity(lv_anim_t * a)
 
 }
 
-int32_t _Panel_UI_anim_callback_get_image_zoom(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_image_zoom(lv_anim_t * a)
 
 {
 
@@ -281,7 +281,7 @@ int32_t _Panel_UI_anim_callback_get_image_zoom(lv_anim_t * a)
 
 }
 
-int32_t _Panel_UI_anim_callback_get_image_angle(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_image_angle(lv_anim_t * a)
 
 {
 
@@ -290,7 +290,7 @@ int32_t _Panel_UI_anim_callback_get_image_angle(lv_anim_t * a)
 
 }
 
-int32_t _Panel_UI_anim_callback_get_image_frame(lv_anim_t * a)
+int32_t _Panel_ui_anim_callback_get_image_frame(lv_anim_t * a)
 
 {
 
@@ -299,7 +299,7 @@ int32_t _Panel_UI_anim_callback_get_image_frame(lv_anim_t * a)
 
 }
 
-void _Panel_UI_arc_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * prefix, const char * postfix)
+void _Panel_ui_arc_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * prefix, const char * postfix)
 {
     char buf[_Panel_UI_TEMPORARY_STRING_BUFFER_SIZE];
 
@@ -308,7 +308,7 @@ void _Panel_UI_arc_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * p
     lv_label_set_text(trg, buf);
 }
 
-void _Panel_UI_slider_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * prefix, const char * postfix)
+void _Panel_ui_slider_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * prefix, const char * postfix)
 {
     char buf[_Panel_UI_TEMPORARY_STRING_BUFFER_SIZE];
 
@@ -316,14 +316,14 @@ void _Panel_UI_slider_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char 
 
     lv_label_set_text(trg, buf);
 }
-void _Panel_UI_checked_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * txt_on, const char * txt_off)
+void _Panel_ui_checked_set_text_value(lv_obj_t * trg, lv_obj_t * src, const char * txt_on, const char * txt_off)
 {
     if(lv_obj_has_state(src, LV_STATE_CHECKED)) lv_label_set_text(trg, txt_on);
     else lv_label_set_text(trg, txt_off);
 }
 
 
-void _Panel_UI_spinbox_step(lv_obj_t * target, int val)
+void _Panel_ui_spinbox_step(lv_obj_t * target, int val)
 
 {
 
@@ -335,7 +335,7 @@ void _Panel_UI_spinbox_step(lv_obj_t * target, int val)
     lv_event_send(target, LV_EVENT_VALUE_CHANGED, 0);
 }
 
-void _Panel_UI_switch_theme(int val)
+void _Panel_ui_switch_theme(int val)
 
 {
 

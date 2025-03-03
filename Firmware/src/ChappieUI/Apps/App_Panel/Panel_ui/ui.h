@@ -14,7 +14,6 @@ extern "C" {
 
 #include "ui_helpers.h"
 #include "ui_events.h"
-
 #include "../src/ChappieUI/Launcher/UI/ui.h"
 
 // SCREEN: ui_Screen1
@@ -45,11 +44,17 @@ extern lv_obj_t * ui_StepcountChart;
 extern lv_obj_t * ui_AppInactivity;
 extern lv_obj_t * ui_PanelInactivity;
 extern lv_obj_t * ui_InactivityDetection;
-extern lv_obj_t * ui_Switch4;
-extern lv_obj_t * ui_ArcSteps3;
+extern lv_obj_t * ui_SwitchInactivity;
+extern lv_obj_t * ui_ArcInactivitycount;
 extern lv_obj_t * ui_ChartInactivity;
 extern lv_obj_t * ui_LabelInactivitycount;
 extern lv_obj_t * ui_AppTestpage;
+extern lv_obj_t * ui_PanelMPU;
+extern lv_obj_t * ui_LabelMPUYAW;
+extern lv_obj_t * ui_LabelMPURoll;
+extern lv_obj_t * ui_LabelMPUPitch;
+extern lv_obj_t * ui_LabelMPUAS;
+extern lv_obj_t * ui_LabelMPUSteps;
 extern lv_obj_t * ui_ImageBattery;
 extern lv_obj_t * ui_LabelTime;
 extern lv_obj_t * ui_ImageBatterybar;
@@ -64,6 +69,9 @@ extern lv_obj_t * ui____initial_actions0;
 LV_IMG_DECLARE(ui_img_img_falldown_png);    // assets/IMG_Falldown.png
 LV_IMG_DECLARE(ui_img_img_steps_png);    // assets/IMG_Steps.png
 LV_IMG_DECLARE(ui_img_img_inactivity_png);    // assets/IMG_Inactivity.png
+
+
+// FONTS
 
 
 // UI INIT
