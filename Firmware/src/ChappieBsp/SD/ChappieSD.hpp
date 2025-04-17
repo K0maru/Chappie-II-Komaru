@@ -10,6 +10,9 @@
  */
 #pragma once
 #include <Arduino.h>
+#include <iostream>
+#include <string>
+#include <vector>
 #include <FS.h>
 #include <SD.h>
 
@@ -61,5 +64,106 @@ class ChappieSD {
 
         inline bool isInited() { return _inited; }
 
+        inline bool readFile(const char* path, lv_coord_t* array,...) {
+            if(!_inited){
+                printf("[SD] Not initialized\n");
+                return false;
+            }
+            printf("[SD] now size : %dGB\n",(SD.cardSize() / 1073741824));
+
+            File file = SD.open(path, FILE_READ);
+
+            if (!file) {
+                printf("[SD] Failed to open file for writing: %s\n", path);
+                return false;
+            }
+
+            printf("[SD] Reading file: %s\n", path);
+            int index = 0;
+            while (file.available() && index < 7) {
+                String line = file.readStringUntil('\n');
+                line.trim();  // 去除空格和换行
+                if (line.length() == 0) continue;
+        
+                int sepIndex = line.indexOf(' ');
+                if (sepIndex == -1) continue;
+        
+                String stepStr = line.substring(sepIndex + 1);
+                int stepCount = stepStr.toInt();
+        
+                array[index++] = stepCount;
+            }
+            file.close();
+            printf("\n[SD] Read complete\n");
+
+            return true;
+        }
+
+        inline bool writeFile(const char* path, const char* format,...) {
+            if(!_inited){
+                printf("[SD] Not initialized\n");
+                return false;
+            }
+            printf("[SD] now size : %dGB\n",(SD.cardSize() / 1073741824));
+
+            va_list args;
+            va_start(args, format);
+            int len = vsnprintf(nullptr, 0, format, args);  // 获取所需长度
+            va_end(args);
+        
+            if (len <= 0)
+                return false;
+        
+            char* buffer = (char*)pvPortMalloc(len + 1);  // +1 for null terminator
+            if (!buffer)
+                return false;
+        
+            va_start(args, format);
+            vsnprintf(buffer, len + 1, format, args);
+            va_end(args);
+
+            File file = SD.open(path, FILE_WRITE);
+
+            if (!file) {
+                printf("[SD] Failed to open file for writing: %s\n", path);
+                vPortFree(buffer);
+                return false;
+            }
+
+            std::vector<String> lines;
+            while (file.available()) {
+                String line = file.readStringUntil('\n');
+                line.trim();  // 去除结尾换行
+                if (line.length() > 0)
+                    lines.push_back(line);
+            }
+            file.close();
+
+            // 如果已有7行，移除第一行
+            if (lines.size() >= 7)
+            lines.erase(lines.begin());
+
+            // 添加新数据
+            lines.push_back(String(buffer));
+
+            // 重新写入文件（覆盖）
+            file = SD.open(path, FILE_WRITE);
+            
+            if (!file) {
+                printf("[SD] Failed to open file for writing: %s\n", path);
+                vPortFree(buffer);
+                return false;
+            }
+            
+            for (auto& l : lines) {
+                file.println(l);
+            }
+
+            file.close();
+            printf("[SD] Write success: %s : %s\n", path, buffer);
+            vPortFree(buffer);
+
+            return false;
+        }
 };
 

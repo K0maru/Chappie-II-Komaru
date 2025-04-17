@@ -1,14 +1,10 @@
 /**
  * @file App_Panel.cpp
- * @brief 
+ * @brief 整合三大功能，完善更新机制
  * @author K0maru (k0maru3@foxmail.com)
- * @version 1.0
- * @date 2025-01-22
+ * @version 3.0
+ * @date 2025-04-16
  * 
- * 
- * @par 修改日志:
- *  <Date>     | <Version> | <Author>       | <Description>                   
- * ----------------------------------------------------------------------------
  */
 #if 1
 #include "App_Panel.h"
@@ -50,7 +46,7 @@ TaskHandle_t task_update = NULL;
 TaskHandle_t task_pedometer_handler = NULL;
 TaskHandle_t task_filter = NULL;
 TaskHandle_t task_InactivityDetect_handler = NULL;
-
+TaskHandle_t Fallwarning_speaker = NULL;
 static std::string app_name = "Panel";
 static CHAPPIE* device;
 static LGFX_Sprite* _screen;
@@ -64,15 +60,20 @@ lv_obj_t * lv_PM = NULL;
 lv_obj_t * sw_PM = NULL;
 lv_timer_t * PM_timer = NULL;
 
+lv_obj_t * Fall_msgbox = NULL;
+lv_obj_t * Fall_msgbox_btn = NULL;
+lv_obj_t * Inactivity_msgbox = NULL;
+lv_obj_t * Inactivity_msgbox_btn = NULL;
+
 #define QUEUE_LENGTH 5
 #define FILTER_WINDOW 5
 #define GRAVITY_LOST_THRESHOLD 0.6
 #define GRAVITY_OVER_THRESHOLD 2
 #define PITCH_THRESHOLD 45
 #define ROLL_THRESHOLD 45
-#define ACCEL_BUFFER_SIZE 100  // 加速度数据的缓存大小（用于计算自相关）
-#define T_MAX 1100  // 最大时间窗口
-#define T_MIN 750   // 最小时间窗口
+#define ACCEL_BUFFER_SIZE 200  // 加速度数据的缓存大小（用于计算自相关）
+#define T_MAX 100  // 最大时间窗口
+#define T_MIN 25   // 最小时间窗口
 
 #define scr_act_height() lv_obj_get_height(lv_scr_act())
 #define scr_act_width() lv_obj_get_width(lv_scr_act())
@@ -95,12 +96,20 @@ unsigned long lastActivityTime = 0;  // 最后一次活动的时间
 unsigned long inactivityTime = 0;  // 累计的静止时间
 bool isIdle = false;  // 标记是否静止
 
-struct StepCount_t {
-    uint16_t steps = 0;
+struct PFD_data_t {
     uint8_t date = -1;
+    uint16_t steps = 0;
+    uint8_t fall_count = 0;
+    uint8_t inactivity_count = 0;
 };
-static I2C_BM8563_DateTypeDef rtc_date;
-static StepCount_t StepCount;
+static PFD_data_t PFD_data;
+// struct StepCount_t {
+//     uint16_t steps = 0;
+//     uint8_t date = -1;
+// };
+// static StepCount_t StepCount;
+
+volatile I2C_BM8563_DateTypeDef rtc_date;
 
 namespace App {
 
@@ -141,6 +150,25 @@ namespace App {
         return sqrt(sum / length);
     }
 
+    static void task_Fallwarning_speaker(void* param){
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        device->Speaker.tone(9000, 300);
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
     void IRAM_ATTR GravityLostInterrupt() {
         GRAVITY_LOST = true;
         UI_LOG("[%s] GRAVITY_LOST\n", App_Panel_appName().c_str());
@@ -156,17 +184,18 @@ namespace App {
     void IRAM_ATTR FallDownInterrupt(){
         FALL_DOWN = true;
         UI_LOG("[%s] FALL_DOWN\n", App_Panel_appName().c_str());
-        while(FALL_DOWN){
-            device->Speaker.tone(9000, 300);
+        xTaskCreate(task_Fallwarning_speaker,"Fallwarning",2000,NULL,2,&Fallwarning_speaker);
+        // while(FALL_DOWN){
+        //     device->Speaker.tone(9000, 300);
             
-            if(device->Button.B.pressed()){
-                GRAVITY_LOST = false;
-                GRAVITY_OVER = false;
-                MOTION_LESS = false;
-                FALL_DOWN = false;
-            }
-            delay(10);
-        }
+        //     if(device->Button.B.pressed()){
+        //         GRAVITY_LOST = false;
+        //         GRAVITY_OVER = false;
+        //         MOTION_LESS = false;
+        //         FALL_DOWN = false;
+        //     }
+        //     delay(10);
+        // }
         
         
     }
@@ -182,7 +211,7 @@ namespace App {
             if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
                 //模拟队列
                 if (QueueIndex < FILTER_WINDOW) {
-                    DataBuffer[QueueIndex] = MPU6050_data_receiver.accelXZ;
+                    DataBuffer[QueueIndex] = MPU6050_data_receiver.accelS;
                     QueueIndex++;
                 }
                 else {
@@ -202,8 +231,8 @@ namespace App {
             Filter_sender.accelS = sum / FILTER_WINDOW;
             accelS[current_index] = Filter_sender.accelS;
             current_index = (current_index + 1) % ACCEL_BUFFER_SIZE;
-            //xQueueSend(Filter_queue,&Filter_sender,portMAX_DELAY);
-            vTaskDelay(20);
+            xQueueSend(Filter_queue,&Filter_sender,portMAX_DELAY);
+            vTaskDelay(pdMS_TO_TICKS(20));
         }
     }
     float calculate_autocorrelation(int T, float mean) {
@@ -218,28 +247,70 @@ namespace App {
         }
 
         // 计算自相关系数
-        return numerator / (sqrt(denominator1 * denominator2));
+        float deno = sqrt(denominator1 * denominator2);
+        if(deno == 0.0) return 0.0;
+        return numerator / deno;
     }
 
+    /**
+     * @brief                   sync chart
+     * @param  op               op can receive 'p':Pedometer;'f':falldown;'i':inactivity
+     * @param  date             date of data
+     * @param  data             data
+     */
+    void chart_sync(const char &op){
+        lv_coord_t array[7] = {0};
+        int index = 0;
+        switch (op)
+        {
+        case 'p':
+            lv_chart_series_t * ui_StepcountChart_series_1 = lv_chart_add_series(ui_StepcountChart, lv_color_hex(0x808080),
+                                                                         LV_CHART_AXIS_PRIMARY_Y);
 
+            device->Sd.readFile("/Pedometer.txt",array);
+            lv_chart_set_ext_y_array(ui_StepcountChart,ui_StepcountChart_series_1,array);
+            break;
+        case 'f':
+            //device->Sd.readFile("/Falldown.txt","%d %d",date,data);
+            break;
+        case 'i':
+            //device->Sd.readFile("/Inactivity.txt","%d %d",date,data);
+            break;
+        default:
+            break;
+        }
+
+    }
+
+    void chart_save(const char &op,const uint8_t &date,const uint16_t &data){
+        switch (op)
+        {
+        case 'p':
+            device->Sd.writeFile("/Pedometer.txt","%d %d\n",date,data);
+            break;
+        case 'f':
+            device->Sd.writeFile("/Falldown.txt","%d %d\n",date,data);
+            break;
+        case 'i':
+            device->Sd.writeFile("/Inactivity.txt","%d %d\n",date,data);
+            break;
+        default:
+            break;
+        }
+    }
     static void task_pedometer(void* param)
     {
-        if(StepCount.date != rtc_date.date){
-            StepCount.date = rtc_date.date;
-            StepCount.steps = 0;
-            ESP_LOGI(App_Panel_appName().c_str(),"Init steps for new day");
-            //UI_LOG("[%s] Init StepCount\n", App_Panel_appName().c_str());
-        }
         while(1){
             // 计算自相关系数
             //float autocorr = calculate_autocorrelation(T, mean);
             float best_autocorr = 0;
-            int best_T = T_MIN;
+            static int best_T = T_MIN;
 
             // 在 T_min 到 T_max 范围内查找最佳的 T
             for (int T = T_MIN; T <= T_MAX; T++) {
                 float mean = calculate_mean(accelS, T);
                 float std = calculate_std(accelS, T, mean);
+                if (std < 0.01f) continue;
                 float autocorr = calculate_autocorrelation(T, mean);
                 if (autocorr > best_autocorr) {
                     best_autocorr = autocorr;
@@ -247,10 +318,10 @@ namespace App {
                 }
             }
             if (best_autocorr > 0.93) {
-                    StepCount.steps++;  // 步数加一
-                    ESP_LOGI(App_Panel_appName().c_str(),"Step detected! Total steps: %d",StepCount.steps);
+                    PFD_data.steps++;  // 步数加一
+                    ESP_LOGI(App_Panel_appName().c_str(),"Step detected! Total steps: %d",PFD_data.steps);
             }
-            vTaskDelay(best_T+10);
+            vTaskDelay(pdMS_TO_TICKS(best_T + 10));
         }
         
     }
@@ -288,6 +359,26 @@ namespace App {
      */
     static void task_mpu6050_data(void* param)
     {
+        if(PFD_data.date != rtc_date.date){
+            if(PFD_data.date == -1){
+                PFD_data.date = rtc_date.date;
+                //chart_save('p',PFD_data.date,PFD_data.steps);
+            }
+            else{
+                chart_save('p',PFD_data.date,PFD_data.steps);
+                chart_sync('p');
+                chart_save('f',PFD_data.date,PFD_data.fall_count);
+                chart_sync('f');
+                chart_save('i',PFD_data.date,PFD_data.inactivity_count);
+                chart_sync('i');
+
+                PFD_data.date = rtc_date.date;
+                PFD_data.steps = 0;
+                PFD_data.fall_count = 0;
+                PFD_data.inactivity_count = 0;
+            }
+            ESP_LOGI(App_Panel_appName().c_str(),"Init steps for new day");
+        }
         mpu_queue = xQueueCreate(5,sizeof(MPU6050_data));
         ESP_LOGI(App_Panel_appName().c_str(),"mpu_queue created");
         //UI_LOG("[%s] mpu_queue created\n", App_Panel_appName().c_str());
@@ -299,7 +390,7 @@ namespace App {
                                        MPU6050_data.accelZ*MPU6050_data.accelZ);
             MPU6050_data.accelXZ = sqrt(MPU6050_data.accelX*MPU6050_data.accelX+MPU6050_data.accelZ*MPU6050_data.accelZ);
             xQueueSend(mpu_queue, &MPU6050_data, portMAX_DELAY);
-            vTaskDelay(10); //100hz
+            vTaskDelay(pdMS_TO_TICKS(10)); //100hz
         }
         
     }
@@ -318,6 +409,7 @@ namespace App {
                             }
                             else{
                                 ESP_LOGI(App_Panel_appName().c_str(),"Error detection");
+                                ESP_LOGI("MPU","Yaw:%.2f Pitch:%.2f Roll:%.2f",MPU6050_data_receiver.Yaw,MPU6050_data_receiver.Pitch,MPU6050_data_receiver.Roll);
                                 GRAVITY_LOST = false;
                                 GRAVITY_OVER = false;
                                 MOTION_LESS = false;
@@ -354,7 +446,7 @@ namespace App {
             else{
                 UI_LOG("[%s] Waitting for data\n", App_Panel_appName().c_str());
             }
-            vTaskDelay(20);
+            vTaskDelay(pdMS_TO_TICKS(20));
         }
     }
 
@@ -390,7 +482,7 @@ namespace App {
     static void task_InactivityDetect(void* param){
         while(1){
             checkInactivity();
-            vTaskDelay(CHECK_INTERVAL);
+            vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL));
         }
     }
 
@@ -411,15 +503,20 @@ namespace App {
     }
     void PM_value_update(lv_timer_t* timer){
 
-        StepCount_t* data = (StepCount_t*)timer->user_data;
-        //ESP_LOGD("%s","Now,Yaw: %.1f",App_FallDetection_appName(),data->Yaw);
-        //lv_obj_set_size(lv_PM, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        PFD_data_t* data = (PFD_data_t*)timer->user_data;
+        
         lv_label_set_text_fmt(ui_LabelStepcount,"%d",data->steps);//格式化显示输出
         lv_arc_set_value(ui_ArcPedometer,data->steps);
         lv_arc_set_value(ui_ArcSteps,data->steps);
-        //lv_label_set_text_fmt(lv_PM, "Steps: %d", data->steps);//格式化显示输出
-        //lv_obj_align(lv_PM, LV_ALIGN_RIGHT_MID, 0, 0);     //显示坐标设置
-        //lv_obj_invalidate(lv_PM); 
+        //chart_sync('p',data->date,data->steps);
+
+        lv_label_set_text_fmt(ui_LabelInactivitycount,"%d",data->inactivity_count);//格式化显示输出
+        lv_arc_set_value(ui_ArcInactivity,data->inactivity_count);
+        lv_arc_set_value(ui_ArcInactivitycount,data->inactivity_count);
+
+        lv_label_set_text_fmt(ui_LabelFallcount,"%d",data->fall_count);//格式化显示输出
+        lv_arc_set_value(ui_ArcFall,data->fall_count);
+        lv_arc_set_value(ui_ArcFalldetection,data->fall_count);
     }
     /**
      * @brief 计步/跌倒检测/久坐检测 功能启用/关闭
@@ -582,6 +679,12 @@ namespace App {
                 PedometertaskEnable();
             }
         }
+        if(obj == Fall_msgbox_btn){
+            ESP_LOGI(App_Panel_appName().c_str(),"FallDetect msgbox Button handler called back");
+            vTaskDelete(Fallwarning_speaker);
+            Fallwarning_speaker = NULL;
+            device->Speaker.stop();
+        }
     }
     static void lv_sw_handler(lv_event_t *e){
         lv_obj_t * obj = lv_event_get_target(e);
@@ -620,7 +723,7 @@ namespace App {
                     App_Panel_TaskStateCheck(task_pedometer_handler);
                 }
                 if(PM_timer == NULL){
-                    PM_timer = lv_timer_create(PM_value_update,1000,&StepCount);
+                    PM_timer = lv_timer_create(PM_value_update,1000,&PFD_data);
                 }
                 PedometerEnable = true;
             }
@@ -641,7 +744,7 @@ namespace App {
 
 /*----------------------------------------------------UI&DEVICE-------------------------------------------------------------------*/
     /**
-     * @brief init screen
+     * @brief test init screen
      */
     static void testscreen_init()
     {
@@ -703,64 +806,14 @@ namespace App {
         }
         delay(10);
     }
-    /**
-     * @brief App界面
-     */
-    static void App_Panel_tileview(void)
-    {
-        lv_obj_t * tv = lv_tileview_create(lv_scr_act());
 
-        /*Tile1: 显示跌倒次数和开关*/
-        lv_obj_t * tile1 = lv_tileview_add_tile(tv, 0, 0, LV_DIR_BOTTOM);
-        //sw_data = lv_switch_create(tile1);
-        
-        //sw_det = lv_switch_create(tile1);
-        
-        lv_obj_t * label = NULL;
-
-        /* 基础对象（矩形背景） */
-        lv_obj_t *obj_det = lv_obj_create(tile1);                               /* 创建基础对象 */
-        lv_obj_set_size(obj_det,scr_act_height() / 2, scr_act_height() / 2 );          /* 设置大小 */
-        lv_obj_align(obj_det, LV_ALIGN_CENTER, -scr_act_width() / 4, 0 );              /* 设置位置 */
-
-
-        /* 开关标签 */
-        lv_obj_t *label_det = lv_label_create(obj_det);                               /* 创建标签 */
-        lv_label_set_text(label_det, "Detection");                                          /* 设置文本内容 */
-        lv_obj_align(label_det, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );          /* 设置位置 */
-
-        /* 开关 */
-        sw_det = lv_switch_create(obj_det);                                       /* 创建开关 */
-        lv_obj_set_size(sw_det,scr_act_height() / 6, scr_act_height() / 12 );      /* 设置大小 */
-        lv_obj_align(sw_det, LV_ALIGN_CENTER, 0, scr_act_height() / 16 );          /* 设置位置 */
-        if(DetectionEnable){lv_obj_add_state(sw_det,LV_STATE_CHECKED);}
-        lv_obj_add_event_cb(sw_det, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
-
-        /* 基础对象（矩形背景） */
-        lv_obj_t *obj_PM = lv_obj_create(tile1);
-        lv_obj_set_size(obj_PM,scr_act_height() / 2, scr_act_height() / 2 );
-        lv_obj_align(obj_PM, LV_ALIGN_CENTER, scr_act_width() / 4, 0 );
-
-        /* 开关标签 */
-        lv_obj_t *label_data = lv_label_create(obj_PM);
-        lv_label_set_text(label_data, "Pedometer");
-        lv_obj_align(label_data, LV_ALIGN_CENTER, 0, -scr_act_height() / 16 );
-
-
-        /* 开关 */
-        sw_PM = lv_switch_create(obj_PM);
-        lv_obj_set_size(sw_PM ,scr_act_height() / 6, scr_act_height() / 12 );
-        lv_obj_align(sw_PM , LV_ALIGN_CENTER, 0, scr_act_height() / 16 );
-        if(PedometerEnable){lv_obj_add_state(sw_PM,LV_STATE_CHECKED);}
-        lv_obj_add_event_cb(sw_PM, lv_sw_handler, LV_EVENT_VALUE_CHANGED, NULL);/* 添加事件 */
-
-        //lv_obj_center(sw_det);
-        /*Tile2：实时显示调试信息*/
-        lv_obj_t * tile2 = lv_tileview_add_tile(tv, 0, 1, LV_DIR_TOP);
-        lv_mpu = lv_label_create(tile2);
-        lv_PM = lv_label_create(tile2);
-        det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
-        PM_timer = lv_timer_create(PM_value_update,30,&StepCount); 
+    void Falldetect_set_msgbox(void){
+        static const char * btns[] ={"Apply",""};
+        Fall_msgbox = lv_msgbox_create(lv_scr_act(),"Detect Falldown!","Do you want stop the beep?",btns,true);
+        Fall_msgbox_btn = lv_msgbox_get_btns(Fall_msgbox);
+        lv_obj_set_width(Fall_msgbox, 220);
+        lv_obj_add_event_cb(Fall_msgbox_btn, panel_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_align(Fall_msgbox,LV_ALIGN_CENTER, 0, 0); /*Align to the corner*/
     }
     /**
      * @brief Called when App is on create
@@ -823,7 +876,7 @@ namespace App {
         lv_obj_add_event_cb(ui_SwitchPedometer, panel_event_cb, LV_EVENT_CLICKED, NULL);
         
         det_timer = lv_timer_create(mpu_value_update,20,&MPU6050_data_receiver);
-        PM_timer = lv_timer_create(PM_value_update,30,&StepCount); 
+        PM_timer = lv_timer_create(PM_value_update,30,&PFD_data); 
         
         if (DetectionEnable) {
             lv_obj_add_state(ui_ButtonFall, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
