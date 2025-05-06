@@ -136,9 +136,6 @@ namespace App {
         if (_device_status.WifiOn) {
             lv_obj_add_state(ui_ButtonWifi, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
         }
-        if (!_device_status.WifiOn) {
-            WiFi.disconnect();
-        }
         if (_device_status.timeupdated) {
             _device_status.timeupdated = false;
 
@@ -216,19 +213,15 @@ namespace App {
         /**
          * @brief wifi按钮按下启动配网
          */
-        if (_device_status.WifiOn && !_device_status.timeupdated && (WiFi.status() != WL_CONNECTED)){
+        if (_device_status.WifiOn && (WiFi.status() != WL_CONNECTED)){
             WiFi_config();
-            _device_status.timeupdated = true;
-            if(WiFi.status() != WL_CONNECTED){
-                WiFi.disconnect();
+            delay(50);
+            //_device_status.timeupdated = true;
+            if(WiFi.status() == WL_DISCONNECTED){
                 _device_status.WifiOn = false;
-                _device_status.timeupdated = false;
+                //_device_status.timeupdated = false;
             }
         }
-        // if (!_device_status.WifiOn && WiFi.status() == WL_CONNECTED){
-        //     WiFi.disconnect();
-        //     UI_LOG("[WiFi] WiFi close\n");
-        // }
     }
 
 
@@ -322,34 +315,11 @@ namespace App {
         return err;
     }
 
-    // static void task_WiFiConnect(void *xTask1){ 
-    //     while (1)
-    //     {
-    //         uint8_t i = 0;
-    //         struct tm timeinfo;
-
-    //         WiFi.mode(WIFI_STA);
-    //         //ESP_LOGI("[WIFI]", "WiFi mode : STA");
-    //         UI_LOG("[WiFi] WiFi mode : STA\n");
-    //         UI_LOG("[WiFi] try connect\n");
-    //         WiFi.begin();
-    //         WiFi.beginSmartConfig();
-    //         UI_LOG("[WiFi] Waiting for SmartConfig...\n");
-    //         while (!WiFi.smartConfigDone()) { vTaskDelay(200); }
-
-    //         UI_LOG("[WiFi] SmartConfig received, connecting WiFi...\n");
-    //         while (WiFi.status() != WL_CONNECTED) { vTaskDelay(200); }
-
-    //         UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
-            
-    //         vTaskDelete(NULL);
-    //     }
-    // }
     static void task_WiFiConnect(void *xTask1){
-        
+        esp_wifi_set_ps(WIFI_PS_MIN_MODEM);//禁用深度睡眠防止由于降低功耗导致WiFi断开
         if(readWifiConfig(&wifi_config) == ESP_OK){
             wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-            //	1.已经配过网，直接连AP
+            /*已经配过网，直接连AP*/
             wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
             ESP_ERROR_CHECK(esp_wifi_init(&cfg));
             ESP_LOGI("WIFI","WiFi init.");
@@ -366,6 +336,7 @@ namespace App {
             //ESP_ERROR_CHECK(esp_wifi_connect());
             while(esp_wifi_connect()!=ESP_OK){ vTaskDelay(200); }
             vTaskDelay(100);
+            if(esp_wifi_connect()!=ESP_OK) clearWiFiConfigFlag();
             ESP_LOGD("WIFI_CFG","SSID: %s PWD: %s",wifi_config.sta.ssid,wifi_config.sta.password);
             ESP_LOGI("WIFI","Status: Connected IP: %s",WiFi.localIP().toString().c_str());
             ESP_LOGD("WIFI","SSID: %s PWD: %s",WiFi.SSID(),WiFi.psk());

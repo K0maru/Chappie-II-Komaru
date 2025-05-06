@@ -4,7 +4,9 @@
 // Project name: SquareLine_Project
 
 #include "../ui.h"
-
+lv_coord_t ui_FallcountChart_series_1_array[] = { 0, 0, 0, 1, 0, 2, 4, 1, 0, 0 };
+lv_coord_t ui_StepcountChart_series_1_array[] = { 300, 1000, 1010, 2050, 5000, 6401, 560};
+lv_coord_t ui_ChartInactivity_series_1_array[] = { 0, 0, 0, 1, 0, 2, 4, 1, 0, 0 };
 void ui_Screen1_screen_init(void)
 {
     ui_Screen1 = lv_obj_create(NULL);
@@ -278,7 +280,7 @@ void ui_Screen1_screen_init(void)
     lv_chart_set_axis_tick(ui_FallcountChart, LV_CHART_AXIS_SECONDARY_Y, 10, 5, 5, 2, false, 25);
     lv_chart_series_t * ui_FallcountChart_series_1 = lv_chart_add_series(ui_FallcountChart, lv_color_hex(0x808080),
                                                                          LV_CHART_AXIS_PRIMARY_Y);
-    static lv_coord_t ui_FallcountChart_series_1_array[] = { 0, 0, 0, 1, 0, 2, 4, 1, 0, 0 };
+    //static lv_coord_t ui_FallcountChart_series_1_array[] = { 0, 0, 0, 1, 0, 2, 4, 1, 0, 0 };
     lv_chart_set_ext_y_array(ui_FallcountChart, ui_FallcountChart_series_1, ui_FallcountChart_series_1_array);
     lv_obj_set_style_bg_color(ui_FallcountChart, lv_color_hex(0xA6B4CD), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_FallcountChart, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -390,7 +392,7 @@ void ui_Screen1_screen_init(void)
     lv_chart_set_axis_tick(ui_StepcountChart, LV_CHART_AXIS_SECONDARY_Y, 0, 0, 0, 0, false, 25);
     lv_chart_series_t * ui_StepcountChart_series_1 = lv_chart_add_series(ui_StepcountChart, lv_color_hex(0x808080),
                                                                          LV_CHART_AXIS_PRIMARY_Y);
-    static lv_coord_t ui_StepcountChart_series_1_array[] = { 300, 1000, 1010, 2050, 5000, 6401, 560 };
+    //static lv_coord_t ui_StepcountChart_series_1_array[] = { 300, 1000, 1010, 2050, 5000, 6401, 560 };
     lv_chart_set_ext_y_array(ui_StepcountChart, ui_StepcountChart_series_1, ui_StepcountChart_series_1_array);
     lv_obj_set_style_bg_color(ui_StepcountChart, lv_color_hex(0xA6B4CD), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_StepcountChart, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -489,7 +491,7 @@ void ui_Screen1_screen_init(void)
     lv_chart_set_axis_tick(ui_ChartInactivity, LV_CHART_AXIS_SECONDARY_Y, 0, 0, 0, 0, false, 25);
     lv_chart_series_t * ui_ChartInactivity_series_1 = lv_chart_add_series(ui_ChartInactivity, lv_color_hex(0x808080),
                                                                           LV_CHART_AXIS_PRIMARY_Y);
-    static lv_coord_t ui_ChartInactivity_series_1_array[] = { 0, 0, 0, 1, 0, 2, 4, 1, 0, 0 };
+    //static lv_coord_t ui_ChartInactivity_series_1_array[] = { 0, 0, 0, 1, 0, 2, 4, 1, 0, 0 };
     lv_chart_set_ext_y_array(ui_ChartInactivity, ui_ChartInactivity_series_1, ui_ChartInactivity_series_1_array);
     lv_obj_set_style_bg_color(ui_ChartInactivity, lv_color_hex(0xA6B4CD), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_ChartInactivity, 255, LV_PART_MAIN | LV_STATE_DEFAULT);

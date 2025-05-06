@@ -11,7 +11,19 @@
 #include "../../../ChappieBsp/Chappie.h"
 #include "math.h"
 #include "Panel_ui/ui.h"
+#include <nvs.h>
+#include <nvs_flash.h>
 
+typedef enum{
+    PFD_unconfiged = 0,
+    PFD_configed = 0xAA,
+}PFD_info_str_t;
+
+
+
+extern lv_coord_t ui_FallcountChart_series_1_array[];
+extern lv_coord_t ui_ChartInactivity_series_1_array[];
+extern lv_coord_t ui_StepcountChart_series_1_array[];
 volatile bool GRAVITY_LOST = false;
 volatile bool GRAVITY_OVER = false;
 volatile bool FALL_DOWN = false;
@@ -47,6 +59,7 @@ TaskHandle_t task_pedometer_handler = NULL;
 TaskHandle_t task_filter = NULL;
 TaskHandle_t task_InactivityDetect_handler = NULL;
 TaskHandle_t Fallwarning_speaker = NULL;
+TaskHandle_t Inactivitywarning_speaker = NULL;
 static std::string app_name = "Panel";
 static CHAPPIE* device;
 static LGFX_Sprite* _screen;
@@ -97,17 +110,13 @@ unsigned long inactivityTime = 0;  // 累计的静止时间
 bool isIdle = false;  // 标记是否静止
 
 struct PFD_data_t {
-    uint8_t date = -1;
+    uint8_t date = 0;
     uint16_t steps = 0;
     uint8_t fall_count = 0;
     uint8_t inactivity_count = 0;
 };
 static PFD_data_t PFD_data;
-// struct StepCount_t {
-//     uint16_t steps = 0;
-//     uint8_t date = -1;
-// };
-// static StepCount_t StepCount;
+#define PFD_LEN 5
 
 volatile I2C_BM8563_DateTypeDef rtc_date;
 
@@ -150,25 +159,61 @@ namespace App {
         return sqrt(sum / length);
     }
 
-    static void task_Fallwarning_speaker(void* param){
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        device->Speaker.tone(9000, 300);
-        vTaskDelay(pdMS_TO_TICKS(500));
-
-        vTaskDelay(pdMS_TO_TICKS(2000));
+    static void task_Fallwarning_speaker(void* param) {
+        // 在 GUI 线程创建弹窗
+        lv_async_call([](void*) {
+            static const char * btns[] = {"Cancel", ""};
+            Fall_msgbox = lv_msgbox_create(lv_scr_act(), "Detect Falldown!", "Do you want to stop the beep?", btns, false);
+            lv_obj_set_width(Fall_msgbox, 220);
+            lv_obj_align(Fall_msgbox, LV_ALIGN_CENTER, 0, 0);
+            // 不直接关闭，在任务中关闭
+            lv_obj_add_event_cb(Fall_msgbox, [](lv_event_t* e) {
+                    //msgbox_close_requested = true;  // 标记请求关闭
+                    ESP_LOGI("test","167");
+                    lv_msgbox_close(Fall_msgbox);
+                    ESP_LOGI("test","169");
+                    GRAVITY_LOST = false;
+                    GRAVITY_OVER = false;
+                    FALL_DOWN = false;
+                    MOTION_LESS = false;
+                    Fall_msgbox = NULL;
+                    vTaskDelete(Fallwarning_speaker);
+                    Fallwarning_speaker = NULL;
+                    ESP_LOGI("test","176");
+                
+            }, LV_EVENT_VALUE_CHANGED, NULL);
+        }, NULL);
+        ESP_LOGI("test","181");
+        // 蜂鸣器响铃循环
+        while (FALL_DOWN) {
+            device->Speaker.tone(9000, 200);
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
     }
 
+    static void task_Inactivity_speaker(void* param) {
+        // 在 GUI 线程创建弹窗
+        lv_async_call([](void*) {
+            static const char * btns[] = {"Cancel", ""};
+            Inactivity_msgbox = lv_msgbox_create(lv_scr_act(), "Detect Inacticity", "Do you want to stop the beep?", btns, false);
+            lv_obj_set_width(Inactivity_msgbox, 220);
+            lv_obj_align(Inactivity_msgbox, LV_ALIGN_CENTER, 0, 0);
+            // 不直接关闭，在任务中关闭
+            lv_obj_add_event_cb(Inactivity_msgbox, [](lv_event_t* e) {
+                    //msgbox_close_requested = true;  // 标记请求关闭
+                    lv_msgbox_close(Inactivity_msgbox);
+                    Inactivity_msgbox = NULL;
+                    isIdle = false;
+                    vTaskDelete(Inactivitywarning_speaker);
+                    Inactivitywarning_speaker = NULL;               
+            }, LV_EVENT_VALUE_CHANGED, NULL);
+        }, NULL);
+        // 蜂鸣器响铃循环
+        while (isIdle) {
+            device->Speaker.tone(9000, 200);
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
     void IRAM_ATTR GravityLostInterrupt() {
         GRAVITY_LOST = true;
         UI_LOG("[%s] GRAVITY_LOST\n", App_Panel_appName().c_str());
@@ -184,7 +229,10 @@ namespace App {
     void IRAM_ATTR FallDownInterrupt(){
         FALL_DOWN = true;
         UI_LOG("[%s] FALL_DOWN\n", App_Panel_appName().c_str());
-        xTaskCreate(task_Fallwarning_speaker,"Fallwarning",2000,NULL,2,&Fallwarning_speaker);
+        if(Fallwarning_speaker == NULL){
+            PFD_data.fall_count++;
+            xTaskCreate(task_Fallwarning_speaker,"Fallwarning",2000,NULL,2,&Fallwarning_speaker);
+        }
         // while(FALL_DOWN){
         //     device->Speaker.tone(9000, 300);
             
@@ -199,6 +247,68 @@ namespace App {
         
         
     }
+    //从nvs中读取wifi配置到给定的sta_config结构体变量
+    static esp_err_t readPFDConfig(PFD_data_t *PFD_config)
+    {
+        nvs_handle nvs;
+        unsigned char PFDConfigVal;
+        //  0.打开
+        nvs_open("PFD_CONFIG", NVS_READWRITE, &nvs); 
+        //  1.读取标志位，并判断
+        nvs_get_u8(nvs, "PFDConfigFlag", &PFDConfigVal);
+        if(PFDConfigVal != PFD_configed){
+            // 1.1 没有PFD数据，关闭nvs，返回错误码
+            ESP_LOGE("PFD", "no PFD config,read fail!");
+            nvs_close(nvs); 
+            return ESP_FAIL;
+        }else{      
+            //  1.2 进入下个步骤
+            ESP_LOGI("PFD", "PFD configed,read ok!");    
+        }
+        //  2.读取上一次配网的ID，password
+        uint32_t len = PFD_LEN;
+        esp_err_t err = nvs_get_blob(nvs, "PFD_config", PFD_config, &len);
+
+        ESP_LOGI("PFD", "readout  date:%d", PFD_config->date);
+        ESP_LOGI("PFD", "readout  steps:%d", PFD_config->steps);
+        ESP_LOGI("PFD", "readout  fall_count:%d", PFD_config->fall_count);
+        ESP_LOGI("PFD", "readout  inactivity_count:%d", PFD_config->inactivity_count);
+        // 3.关闭nvs退出
+        nvs_close(nvs);
+        return err;
+    }
+
+    /**
+     * @brief  保存PFD配置参数结构体变量PFD_config到nvs
+     * @param  PFD_config      wifi配置参数
+     */
+    static void savePFDConfig(PFD_data_t *PFD_config)
+    {
+        nvs_handle nvs;
+        //  0.打开
+        nvs_open("PFD_CONFIG", NVS_READWRITE, &nvs); 
+        //  1.写入标记 0xaa,表示已经存储
+        nvs_set_u8(nvs, "PFDConfigFlag", PFD_configed);
+        //  2.写入PFD数据
+        ESP_ERROR_CHECK(nvs_set_blob(nvs, "PFD_config", PFD_config, PFD_LEN));
+        //  3.提交 并保存表的内容
+        ESP_ERROR_CHECK(nvs_commit(nvs)); 
+        //  4.关闭nvs退出
+        nvs_close(nvs);                   
+    }
+
+    void clearPFDConfigFlag(void){
+        nvs_handle nvs;
+        //  0.打开
+        nvs_open("PFD_CONFIG", NVS_READWRITE, &nvs); 
+        //  1.写入标记 0x00,清除配网标记
+        nvs_set_u8(nvs, "PFDConfigFlag", PFD_unconfiged);
+        //  2.提交 并保存表的内容
+        ESP_ERROR_CHECK(nvs_commit(nvs)); 
+        //  3.关闭nvs退出
+        nvs_close(nvs); 
+    }
+
     /**
      * @brief   五点滤波，每10ms采集数据，每20ms滤波
      */
@@ -259,30 +369,47 @@ namespace App {
      * @param  data             data
      */
     void chart_sync(const char &op){
+        ESP_LOGI("SD","Start chart sync");
         lv_coord_t array[7] = {0};
+        //lv_chart_series_t * series;
+        lv_coord_t* target_array = nullptr;
+        lv_obj_t* chart = nullptr;
         int index = 0;
+        const char* path;
         switch (op)
         {
-        case 'p':
-            lv_chart_series_t * ui_StepcountChart_series_1 = lv_chart_add_series(ui_StepcountChart, lv_color_hex(0x808080),
-                                                                         LV_CHART_AXIS_PRIMARY_Y);
-
-            device->Sd.readFile("/Pedometer.txt",array);
-            lv_chart_set_ext_y_array(ui_StepcountChart,ui_StepcountChart_series_1,array);
+        case 'p':{
+            target_array = ui_StepcountChart_series_1_array;
+            chart = ui_StepcountChart;
+            path = "/Pedometer.txt";
             break;
-        case 'f':
-            //device->Sd.readFile("/Falldown.txt","%d %d",date,data);
+            }
+        case 'f':{
+            target_array = ui_FallcountChart_series_1_array;
+            chart = ui_FallcountChart;
+            path = "/Falldown.txt";
             break;
-        case 'i':
-            //device->Sd.readFile("/Inactivity.txt","%d %d",date,data);
+            }
+        case 'i':{
+            target_array = ui_ChartInactivity_series_1_array;
+            chart = ui_ChartInactivity;
+            path = "/Inactivity.txt";;
             break;
+            }
         default:
             break;
         }
-
+        device->Sd.readFile(path,array);
+        for(index = 0;index < 7;++index){
+            target_array[index] = array[index];
+            //series->y_points[index] = array[index];
+        }
+        lv_chart_refresh(chart);
+        ESP_LOGI("SD","chart sync done");
     }
 
     void chart_save(const char &op,const uint8_t &date,const uint16_t &data){
+        ESP_LOGI("SD","Try to write");
         switch (op)
         {
         case 'p':
@@ -297,6 +424,7 @@ namespace App {
         default:
             break;
         }
+        ESP_LOGI("SD","Done");
     }
     static void task_pedometer(void* param)
     {
@@ -360,17 +488,18 @@ namespace App {
     static void task_mpu6050_data(void* param)
     {
         if(PFD_data.date != rtc_date.date){
-            if(PFD_data.date == -1){
+            if(PFD_data.date == 0){
                 PFD_data.date = rtc_date.date;
                 //chart_save('p',PFD_data.date,PFD_data.steps);
             }
             else{
+                ESP_LOGI("MPU","Init steps for new day");
                 chart_save('p',PFD_data.date,PFD_data.steps);
-                chart_sync('p');
+                //chart_sync('p');
                 chart_save('f',PFD_data.date,PFD_data.fall_count);
-                chart_sync('f');
+                //chart_sync('f');
                 chart_save('i',PFD_data.date,PFD_data.inactivity_count);
-                chart_sync('i');
+                //chart_sync('i');
 
                 PFD_data.date = rtc_date.date;
                 PFD_data.steps = 0;
@@ -399,52 +528,54 @@ namespace App {
     {
         TickType_t startTime = 0; // 记录开始时间
         while(1){
-            if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
-                if(GRAVITY_LOST){
-                    if(GRAVITY_OVER){
-                        TickType_t MotionlessStart = 0;
-                        if(MOTION_LESS){
-                            if(abs(MPU6050_data_receiver.Pitch) > 45 || abs(MPU6050_data_receiver.Roll) > 45){
-                                FallDownInterrupt();
+            if(Fallwarning_speaker == NULL){
+                if(xQueueReceive(mpu_queue,&MPU6050_data_receiver,portMAX_DELAY) == true){
+                    if(GRAVITY_LOST){
+                        if(GRAVITY_OVER){
+                            TickType_t MotionlessStart = 0;
+                            if(MOTION_LESS){
+                                if(abs(MPU6050_data_receiver.Pitch) > 45 || abs(MPU6050_data_receiver.Roll) > 45){
+                                    FallDownInterrupt();
+                                }
+                                else if(FALL_DOWN == false){
+                                    ESP_LOGI(App_Panel_appName().c_str(),"Error detection");
+                                    ESP_LOGI("MPU","Yaw:%.2f Pitch:%.2f Roll:%.2f",MPU6050_data_receiver.Yaw,MPU6050_data_receiver.Pitch,MPU6050_data_receiver.Roll);
+                                    GRAVITY_LOST = false;
+                                    GRAVITY_OVER = false;
+                                    MOTION_LESS = false;
+                                }
+                            }
+                            if(MotionlessStart == 0&&MOTION_LESS == false) MotionlessStart = xTaskGetTickCount();
+                            if(((xTaskGetTickCount() - MotionlessStart) >= pdMS_TO_TICKS(1500)||(xTaskGetTickCount() - MotionlessStart) <= pdMS_TO_TICKS(2500))&&
+                               (MPU6050_data_receiver.accelS >= 0.9||MPU6050_data_receiver.accelS<=1.1)){
+                                MotionLessInterrupt();
                             }
                             else{
-                                ESP_LOGI(App_Panel_appName().c_str(),"Error detection");
-                                ESP_LOGI("MPU","Yaw:%.2f Pitch:%.2f Roll:%.2f",MPU6050_data_receiver.Yaw,MPU6050_data_receiver.Pitch,MPU6050_data_receiver.Roll);
-                                GRAVITY_LOST = false;
                                 GRAVITY_OVER = false;
-                                MOTION_LESS = false;
+                                GRAVITY_LOST = false;
+                            }
+                            
+    
+                        }
+                        /*失重后，0.5s内检测是否进入超重状态（跌倒）*/
+                        if(startTime == 0&&GRAVITY_OVER == false) startTime = xTaskGetTickCount();
+                        if((xTaskGetTickCount() - startTime) < pdMS_TO_TICKS(500) && GRAVITY_OVER == false){
+                            if(MPU6050_data_receiver.accelS > GRAVITY_OVER_THRESHOLD){
+                                GravityOverInterrupt();
                             }
                         }
-                        if(MotionlessStart == 0&&MOTION_LESS == false) MotionlessStart = xTaskGetTickCount();
-                        if(((xTaskGetTickCount() - MotionlessStart) >= pdMS_TO_TICKS(1500)||(xTaskGetTickCount() - MotionlessStart) <= pdMS_TO_TICKS(2500))&&
-                           (MPU6050_data_receiver.accelS >= 0.9||MPU6050_data_receiver.accelS<=1.1)){
-                            MotionLessInterrupt();
-                        }
-                        else{
-                            GRAVITY_OVER = false;
+                        else if(GRAVITY_OVER == false){
+                            startTime = 0;
                             GRAVITY_LOST = false;
                         }
-                        
-
                     }
-                    /*失重后，0.5s内检测是否进入超重状态（跌倒）*/
-                    if(startTime == 0&&GRAVITY_OVER == false) startTime = xTaskGetTickCount();
-                    if((xTaskGetTickCount() - startTime) < pdMS_TO_TICKS(500) && GRAVITY_OVER == false){
-                        if(MPU6050_data_receiver.accelS > GRAVITY_OVER_THRESHOLD){
-                            GravityOverInterrupt();
-                        }
-                    }
-                    else if(GRAVITY_OVER == false){
-                        startTime = 0;
-                        GRAVITY_LOST = false;
+                    else if(MPU6050_data_receiver.accelS < GRAVITY_LOST_THRESHOLD && GRAVITY_LOST == false){
+                        GravityLostInterrupt();
                     }
                 }
-                else if(MPU6050_data_receiver.accelS < GRAVITY_LOST_THRESHOLD && GRAVITY_LOST == false){
-                    GravityLostInterrupt();
+                else{
+                    UI_LOG("[%s] Waitting for data\n", App_Panel_appName().c_str());
                 }
-            }
-            else{
-                UI_LOG("[%s] Waitting for data\n", App_Panel_appName().c_str());
             }
             vTaskDelay(pdMS_TO_TICKS(20));
         }
@@ -456,10 +587,8 @@ namespace App {
 
     void triggerInactivityReminder() {
         // 显示久坐提醒
-        lv_obj_t *label = lv_label_create(lv_scr_act());
-        lv_label_set_text(label, "Time to move!");
-        lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-        
+        PFD_data.inactivity_count++;
+        xTaskCreate(task_Inactivity_speaker,"Inactivitywarning",2000,NULL,2,&Inactivitywarning_speaker);
         // 如果有振动功能，也可以触发振动提醒
         // device->vibrate();  // 假设设备有振动功能
     }
@@ -504,7 +633,7 @@ namespace App {
     void PM_value_update(lv_timer_t* timer){
 
         PFD_data_t* data = (PFD_data_t*)timer->user_data;
-        
+        //ESP_LOGI("test","%d",data->fall_count);
         lv_label_set_text_fmt(ui_LabelStepcount,"%d",data->steps);//格式化显示输出
         lv_arc_set_value(ui_ArcPedometer,data->steps);
         lv_arc_set_value(ui_ArcSteps,data->steps);
@@ -806,15 +935,6 @@ namespace App {
         }
         delay(10);
     }
-
-    void Falldetect_set_msgbox(void){
-        static const char * btns[] ={"Apply",""};
-        Fall_msgbox = lv_msgbox_create(lv_scr_act(),"Detect Falldown!","Do you want stop the beep?",btns,true);
-        Fall_msgbox_btn = lv_msgbox_get_btns(Fall_msgbox);
-        lv_obj_set_width(Fall_msgbox, 220);
-        lv_obj_add_event_cb(Fall_msgbox_btn, panel_event_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_align(Fall_msgbox,LV_ALIGN_CENTER, 0, 0); /*Align to the corner*/
-    }
     /**
      * @brief Called when App is on create
      * 
@@ -822,9 +942,22 @@ namespace App {
     void App_Panel_onCreate()
     {
         UI_LOG("[%s] onCreate\n", App_Panel_appName().c_str());
-        
+        if(device->Sd.isInited()){
+            ESP_LOGI("SD","SD already inited");
+        }
+        else{
+            ESP_LOGI("SD","Try SD init");
+            device->Sd.init();
+        }
         //static bool falldown = false;
         testscreen_init();
+        /*从NVS内读取保存的PFD数据*/
+        if(readPFDConfig(&PFD_data) != ESP_OK){
+            PFD_data.date = 0;
+            PFD_data.steps = 0;
+            PFD_data.fall_count = 0;
+            PFD_data.inactivity_count = 0;
+        }
         /*数据收集线程未启动且设置要求启动时，创建数据收集线程*/
         if(task_mpu == NULL){
             ESP_LOGI(App_Panel_appName().c_str(),"Try to create MPUtask");
@@ -833,6 +966,7 @@ namespace App {
             //xTaskCreate(task_mpu6050_data, "MPU6050_DATA", 5000, NULL, 3, &task_mpu);
             App_Panel_TaskStateCheck(task_mpu);
             device->Lcd.printf("Data collection task has been created\n");
+            delay(500);
             //UI_LOG("[%s] Data collection task has been created\n", App_Panel_appName().c_str());
         }
         /*检测线程未启动且要求启动时，创建检测线程*/
@@ -890,6 +1024,9 @@ namespace App {
             lv_obj_add_state(ui_ButtonInactivity, (LV_STATE_CHECKED | LV_STATE_FOCUSED));
             lv_obj_add_state(ui_SwitchInactivity,(LV_STATE_CHECKED));
         }
+        chart_sync('p');
+        chart_sync('f');
+        chart_sync('i');
         device->lvgl.enable();
         //App_Panel_tileview();
 
@@ -919,6 +1056,8 @@ namespace App {
         PedometertaskDisable();
         InactivityDetectiontaskDisable();
         testscreen_deinit();
+        clearPFDConfigFlag();
+        savePFDConfig(&PFD_data);
         UI_LOG("[%s] onDestroy\n", App_Panel_appName().c_str());
     }
 

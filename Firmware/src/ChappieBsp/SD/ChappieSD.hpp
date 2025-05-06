@@ -10,6 +10,7 @@
  */
 #pragma once
 #include <Arduino.h>
+#include <lvgl.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -43,20 +44,28 @@ class ChappieSD {
             bool ret = SD.begin(CHAPPIE_SD_PIN_CS, *sd_spi, 40000000);
             
             if (!ret) {
-                printf("[SD] init failed\n");
+                ESP_LOGI("SD","init failed");
+                //printf("[SD] init failed\n");
                 return ret;
             }
-            printf("[SD] init success, ");
+            //printf("[SD] init success, ");
 
             /* Get SD card info */
             uint8_t cardType = SD.cardType();
-            if (cardType == CARD_MMC)
-                printf("MMC");
-            else if(cardType == CARD_SD)
-                printf("SDSC");
-            else if(cardType == CARD_SDHC)
-                printf("SDHC");
-            printf(" %dGB\n", (SD.cardSize() / 1073741824));
+            if (cardType == CARD_MMC){
+                ESP_LOGI("SD","init success,MMC");
+                //printf("MMC");
+            }  
+            else if(cardType == CARD_SD){
+                ESP_LOGI("SD","init success,SDSC");
+                //printf("SDSC");
+            }
+            else if(cardType == CARD_SDHC){
+                ESP_LOGI("SD","init success,SDHC");
+                //printf("SDHC");
+            }
+            ESP_LOGI("SD","%dGB",(SD.cardSize() / 1073741824));
+            //printf(" %dGB\n", (SD.cardSize() / 1073741824));
 
             _inited = true;
             return ret;
@@ -66,19 +75,22 @@ class ChappieSD {
 
         inline bool readFile(const char* path, lv_coord_t* array,...) {
             if(!_inited){
-                printf("[SD] Not initialized\n");
+                ESP_LOGI("SD","Not initialized");
+                //printf("[SD] Not initialized\n");
                 return false;
             }
-            printf("[SD] now size : %dGB\n",(SD.cardSize() / 1073741824));
+            ESP_LOGI("SD","now size : %dGB",(SD.cardSize() / 1073741824));
+            //printf("[SD] now size : %dGB\n",(SD.cardSize() / 1073741824));
 
             File file = SD.open(path, FILE_READ);
 
             if (!file) {
-                printf("[SD] Failed to open file for writing: %s\n", path);
+                ESP_LOGI("SD","Failed to open file for writing: %s",path);
+                //printf("[SD] Failed to open file for writing: %s\n", path);
                 return false;
             }
-
-            printf("[SD] Reading file: %s\n", path);
+            ESP_LOGI("SD","Reading file: %s",path);
+            //printf("[SD] Reading file: %s\n", path);
             int index = 0;
             while (file.available() && index < 7) {
                 String line = file.readStringUntil('\n');
@@ -88,29 +100,30 @@ class ChappieSD {
                 int sepIndex = line.indexOf(' ');
                 if (sepIndex == -1) continue;
         
-                String stepStr = line.substring(sepIndex + 1);
-                int stepCount = stepStr.toInt();
+                String cntStr = line.substring(sepIndex + 1);
+                int Count = cntStr.toInt();
         
-                array[index++] = stepCount;
+                array[index++] = Count;
             }
             file.close();
-            printf("\n[SD] Read complete\n");
+            ESP_LOGI("SD","Read complete");
+            //printf("\n[SD] Read complete\n");
 
             return true;
         }
 
         inline bool writeFile(const char* path, const char* format,...) {
             if(!_inited){
-                printf("[SD] Not initialized\n");
+                ESP_LOGI("SD","Not initialized");
+                //printf("[SD] Not initialized\n");
                 return false;
             }
-            printf("[SD] now size : %dGB\n",(SD.cardSize() / 1073741824));
-
+            ESP_LOGI("SD","now size : %dGB\n",(SD.cardSize() / 1073741824));
+            //printf("[SD] now size : %dGB\n",(SD.cardSize() / 1073741824));
             va_list args;
             va_start(args, format);
             int len = vsnprintf(nullptr, 0, format, args);  // 获取所需长度
             va_end(args);
-        
             if (len <= 0)
                 return false;
         
@@ -121,15 +134,16 @@ class ChappieSD {
             va_start(args, format);
             vsnprintf(buffer, len + 1, format, args);
             va_end(args);
-
-            File file = SD.open(path, FILE_WRITE);
+            ESP_LOGI("test","139");
+            File file = SD.open(path, FILE_READ);
 
             if (!file) {
-                printf("[SD] Failed to open file for writing: %s\n", path);
+                ESP_LOGI("SD","Failed to open file for writing: %s",path);
+                //printf("[SD] Failed to open file for writing: %s\n", path);
                 vPortFree(buffer);
                 return false;
             }
-
+            ESP_LOGI("test","148");
             std::vector<String> lines;
             while (file.available()) {
                 String line = file.readStringUntil('\n');
@@ -137,20 +151,23 @@ class ChappieSD {
                 if (line.length() > 0)
                     lines.push_back(line);
             }
+            ESP_LOGI("test","156");
             file.close();
-
+            ESP_LOGI("test","158");
             // 如果已有7行，移除第一行
             if (lines.size() >= 7)
             lines.erase(lines.begin());
-
+            ESP_LOGI("test","162");
             // 添加新数据
             lines.push_back(String(buffer));
-
+            delay(20);
             // 重新写入文件（覆盖）
+            ESP_LOGI("test","167");
             file = SD.open(path, FILE_WRITE);
-            
+            ESP_LOGI("test","169");
             if (!file) {
-                printf("[SD] Failed to open file for writing: %s\n", path);
+                ESP_LOGI("SD","Failed to open file for writing: %s",path);
+                //printf("[SD] Failed to open file for writing: %s\n", path);
                 vPortFree(buffer);
                 return false;
             }
@@ -158,12 +175,13 @@ class ChappieSD {
             for (auto& l : lines) {
                 file.println(l);
             }
-
+            ESP_LOGI("test","180");
             file.close();
-            printf("[SD] Write success: %s : %s\n", path, buffer);
+            ESP_LOGI("SD","Write success: %s : %s",path, buffer);
+            //printf("[SD] Write success: %s : %s\n", path, buffer);
             vPortFree(buffer);
 
-            return false;
+            return true;
         }
 };
 
