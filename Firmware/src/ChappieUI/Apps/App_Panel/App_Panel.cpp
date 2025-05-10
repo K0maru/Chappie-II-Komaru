@@ -92,7 +92,7 @@ lv_obj_t * Inactivity_msgbox_btn = NULL;
 #define scr_act_width() lv_obj_get_width(lv_scr_act())
 
 #define ACCEL_THRESHOLD 0.05   // 加速度阈值，低于这个值视为静止
-#define INACTIVITY_THRESHOLD 1800000  // 久坐阈值，单位：毫秒（30分钟）
+#define INACTIVITY_THRESHOLD 1800000  // 久坐阈值，（30分钟）
 #define CHECK_INTERVAL 1000  // 每秒检查一次静止状态
 
 float accelS[ACCEL_BUFFER_SIZE];  // 存储加速度强度数据
@@ -118,7 +118,7 @@ struct PFD_data_t {
 static PFD_data_t PFD_data;
 #define PFD_LEN 5
 
-volatile I2C_BM8563_DateTypeDef rtc_date;
+static I2C_BM8563_DateTypeDef rtc_date;
 
 namespace App {
 
@@ -426,6 +426,10 @@ namespace App {
         }
         ESP_LOGI("SD","Done");
     }
+    /**
+     * @brief 计步器
+     * 
+     */
     static void task_pedometer(void* param)
     {
         while(1){
@@ -493,12 +497,15 @@ namespace App {
                 //chart_save('p',PFD_data.date,PFD_data.steps);
             }
             else{
-                ESP_LOGI("MPU","Init steps for new day");
+                ESP_LOGI("MPU","Init PFD for new day");
                 chart_save('p',PFD_data.date,PFD_data.steps);
+                vTaskDelay(pdMS_TO_TICKS(30));
                 //chart_sync('p');
                 chart_save('f',PFD_data.date,PFD_data.fall_count);
+                vTaskDelay(pdMS_TO_TICKS(30));
                 //chart_sync('f');
                 chart_save('i',PFD_data.date,PFD_data.inactivity_count);
+                vTaskDelay(pdMS_TO_TICKS(30));
                 //chart_sync('i');
 
                 PFD_data.date = rtc_date.date;
@@ -523,7 +530,10 @@ namespace App {
         }
         
     }
-    
+    /**
+     * @brief 跌倒检测
+     * 
+     */
     static void task_falldetect(void* param)
     {
         TickType_t startTime = 0; // 记录开始时间
@@ -587,8 +597,10 @@ namespace App {
 
     void triggerInactivityReminder() {
         // 显示久坐提醒
-        PFD_data.inactivity_count++;
-        xTaskCreate(task_Inactivity_speaker,"Inactivitywarning",2000,NULL,2,&Inactivitywarning_speaker);
+        if(Inactivitywarning_speaker == NULL){
+            PFD_data.inactivity_count++;
+            xTaskCreate(task_Inactivity_speaker,"Inactivitywarning",2000,NULL,2,&Inactivitywarning_speaker);
+        }
         // 如果有振动功能，也可以触发振动提醒
         // device->vibrate();  // 假设设备有振动功能
     }
@@ -949,6 +961,8 @@ namespace App {
             ESP_LOGI("SD","Try SD init");
             device->Sd.init();
         }
+        device->Rtc.getDate(&rtc_date);
+        ESP_LOGI("RTC","rtc_date : %d",rtc_date.date);
         //static bool falldown = false;
         testscreen_init();
         /*从NVS内读取保存的PFD数据*/

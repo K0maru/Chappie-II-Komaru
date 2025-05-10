@@ -50,6 +50,7 @@ struct DeviceStatus_t {
 };
 static DeviceStatus_t _device_status;
 
+TaskHandle_t task_wifi_handler;
 
 namespace App {
 
@@ -213,7 +214,7 @@ namespace App {
         /**
          * @brief wifi按钮按下启动配网
          */
-        if (_device_status.WifiOn && (WiFi.status() != WL_CONNECTED)){
+        if (_device_status.WifiOn && (WiFi.status() != WL_CONNECTED) && (task_wifi_handler == NULL)){
             WiFi_config();
             delay(50);
             //_device_status.timeupdated = true;
@@ -275,6 +276,7 @@ namespace App {
     {
         nvs_handle nvs;
         //  0.打开
+        delay(25);
         nvs_open("WIFI_CONFIG", NVS_READWRITE, &nvs); 
         //  1.写入标记 0xaa,表示已经配过网
         nvs_set_u8(nvs, "WifiConfigFlag", wifi_configed);
@@ -283,6 +285,7 @@ namespace App {
         //  3.提交 并保存表的内容
         ESP_ERROR_CHECK(nvs_commit(nvs)); 
         //  4.关闭nvs退出
+        delay(25);
         nvs_close(nvs);                   
     }
 
@@ -334,12 +337,13 @@ namespace App {
             ESP_LOGI("WIFI","WiFi Start");      
             /* 启动WiFi连接到 AP*/
             //ESP_ERROR_CHECK(esp_wifi_connect());
-            while(esp_wifi_connect()!=ESP_OK){ vTaskDelay(200); }
+            while(esp_wifi_connect()!=ESP_OK){ vTaskDelay(1000); }
             vTaskDelay(100);
-            if(esp_wifi_connect()!=ESP_OK) clearWiFiConfigFlag();
+            if(WiFi.status()!=WL_CONNECTED) clearWiFiConfigFlag();
             ESP_LOGD("WIFI_CFG","SSID: %s PWD: %s",wifi_config.sta.ssid,wifi_config.sta.password);
             ESP_LOGI("WIFI","Status: Connected IP: %s",WiFi.localIP().toString().c_str());
             ESP_LOGD("WIFI","SSID: %s PWD: %s",WiFi.SSID(),WiFi.psk());
+            task_wifi_handler = NULL;
             vTaskDelete(NULL);
         }
         else{
@@ -369,6 +373,7 @@ namespace App {
             /*补上存配置的代码*/
             ESP_LOGD("WIFI","Task close.");
             //UI_LOG("[WiFi] Connected. IP: %s\n", WiFi.localIP().toString().c_str()); 
+            task_wifi_handler = NULL;
             vTaskDelete(NULL);
         }
 
@@ -376,8 +381,13 @@ namespace App {
     /*WiFi config*/
     void App_Launcher::WiFi_config()
     {
-        UI_LOG("[WiFi] WiFi config start\n");
-        xTaskCreatePinnedToCore(task_WiFiConnect, "TaskWiFiConnect", 6*1024, NULL, 1, NULL, 0);
+        ESP_LOGI("WiFi","WiFi config start\n");
+        if(task_wifi_handler == NULL){
+            xTaskCreatePinnedToCore(task_WiFiConnect, "TaskWiFiConnect", 6*1024, NULL, 1, &task_wifi_handler, 0);
+        }
+        else{
+            ESP_LOGI("WiFi","Connect task already exist");
+        }
         //UI_LOG("[WiFi] WiFi config done\n");
     }
     

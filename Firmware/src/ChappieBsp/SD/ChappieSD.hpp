@@ -41,7 +41,7 @@ class ChappieSD {
             /* Init spi */
             SPIClass* sd_spi = new SPIClass(HSPI);
             sd_spi->begin(CHAPPIE_SD_PIN_CLK, CHAPPIE_SD_PIN_MISO, CHAPPIE_SD_PIN_MOSI, CHAPPIE_SD_PIN_CS);
-            bool ret = SD.begin(CHAPPIE_SD_PIN_CS, *sd_spi, 40000000);
+            bool ret = SD.begin(CHAPPIE_SD_PIN_CS, *sd_spi, 400000);
             
             if (!ret) {
                 ESP_LOGI("SD","init failed");
